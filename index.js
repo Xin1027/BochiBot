@@ -5,11 +5,19 @@ require('dotenv').config();
 
 class BochiBot {
     constructor() {
-        this.client = new Client({
-            intents: [
-                GatewayIntentBits.Guilds,
-                GatewayIntentBits.GuildEmojisAndStickers
-            ]
+        // 尝试使用完整权限，如果失败则降级到基础权限
+        this.fullPermissions = false;  // 先用基础权限启动
+        this.client = this.createClient(false);
+        
+        // 监听连接错误
+        this.client.on('error', (error) => {
+            if (error.message.includes('disallowed intents') || error.message.includes('Used disallowed intents')) {
+                console.log('⚠️  完整权限未启用，切换到基础模式...');
+                this.fullPermissions = false;
+                this.restartWithBasicPermissions();
+            } else {
+                console.error('Discord连接错误:', error);
+            }
         });
 
         this.config = {
@@ -41,6 +49,43 @@ class BochiBot {
         this.commands = new Collection();
         this.setupCommands();
         this.setupEventHandlers();
+    }
+
+    createClient(fullPermissions = true) {
+        if (fullPermissions) {
+            return new Client({
+                intents: [
+                    GatewayIntentBits.Guilds,
+                    GatewayIntentBits.GuildMessages,
+                    GatewayIntentBits.MessageContent,
+                    GatewayIntentBits.GuildEmojisAndStickers
+                ]
+            });
+        } else {
+            return new Client({
+                intents: [
+                    GatewayIntentBits.Guilds,
+                    GatewayIntentBits.GuildEmojisAndStickers
+                ]
+            });
+        }
+    }
+
+    async restartWithBasicPermissions() {
+        try {
+            await this.client.destroy();
+        } catch (error) {
+            console.log('清理旧客户端时出错:', error.message);
+        }
+        
+        this.client = this.createClient(false);
+        this.setupEventHandlers();
+        
+        try {
+            await this.client.login(process.env.DISCORD_TOKEN);
+        } catch (error) {
+            console.error('使用基础权限登录失败:', error);
+        }
     }
 
     setupCommands() {
@@ -99,6 +144,17 @@ class BochiBot {
     setupEventHandlers() {
         this.client.once(Events.ClientReady, () => {
             console.log(`✅ 波奇机器人已启动! 登录为 ${this.client.user.tag}`);
+            console.log(`🔧 权限模式: ${this.fullPermissions ? '完整权限 (可检测图片)' : '基础权限 (仅配置功能)'}`);
+            console.log(`🔧 当前配置:`);
+            console.log(`   - 图片反应: ${this.config.botSettings.autoReaction ? '开启' : '关闭'}`);
+            console.log(`   - AI点评: ${this.config.botSettings.aiComment ? '开启' : '关闭'}`);
+            console.log(`   - 标准表情数量: ${this.config.botSettings.reactionEmojis.length}`);
+            console.log(`   - 已选服务器表情数量: ${this.config.botSettings.selectedServerEmojis.length}`);
+            if (this.fullPermissions) {
+                console.log(`🚀 正在监听消息和图片...`);
+            } else {
+                console.log(`⚠️  图片检测功能需要启用 MESSAGE CONTENT INTENT 权限`);
+            }
             this.registerSlashCommands();
         });
 
@@ -153,18 +209,24 @@ class BochiBot {
             }
         });
 
-        // 处理消息（图片检测）
-        this.client.on(Events.MessageCreate, async (message) => {
-            if (message.author.bot) return;
-            
-            if (message.attachments.size > 0) {
-                for (const attachment of message.attachments.values()) {
-                    if (attachment.contentType && attachment.contentType.startsWith('image/')) {
-                        await this.handleImageMessage(message, attachment);
+        // 处理消息（图片检测） - 仅在完整权限模式下启用
+        if (this.fullPermissions) {
+            this.client.on(Events.MessageCreate, async (message) => {
+                if (message.author.bot) return;
+                
+                if (message.attachments.size > 0) {
+                    console.log(`📨 检测到新消息 (来自 ${message.author.username}) - 附件数量: ${message.attachments.size}`);
+                    for (const attachment of message.attachments.values()) {
+                        if (attachment.contentType && attachment.contentType.startsWith('image/')) {
+                            console.log(`🖼️ 发现图片附件: ${attachment.name} (${attachment.contentType})`);
+                            await this.handleImageMessage(message, attachment);
+                        } else {
+                            console.log(`📎 非图片附件: ${attachment.name} (${attachment.contentType || '未知类型'})`);
+                        }
                     }
                 }
-            }
-        });
+            });
+        }
     }
 
     async handleButtonInteraction(interaction) {
@@ -245,6 +307,9 @@ class BochiBot {
             case 'select_server_emojis':
                 await this.showServerEmojiSelection(interaction);
                 break;
+            case 'test_permissions':
+                await this.testPermissions(interaction);
+                break;
         }
     }
 
@@ -293,7 +358,11 @@ class BochiBot {
                     .setCustomId('select_server_emojis')
                     .setLabel('选择服务器表情')
                     .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(this.config.botSettings.serverEmojisCache.length === 0)
+                    .setDisabled(this.config.botSettings.serverEmojisCache.length === 0),
+                new ButtonBuilder()
+                    .setCustomId('test_permissions')
+                    .setLabel(!this.fullPermissions ? '尝试启用完整权限' : '权限测试')
+                    .setStyle(!this.fullPermissions ? ButtonStyle.Success : ButtonStyle.Secondary)
             );
 
         await interaction.update({
@@ -900,6 +969,67 @@ class BochiBot {
             await interaction.reply({
                 content: '❌ 获取服务器表情时发生错误。',
                 flags: MessageFlags.Ephemeral
+            });
+        }
+    }
+
+    async testPermissions(interaction) {
+        if (this.fullPermissions) {
+            await interaction.reply({
+                content: '✅ 机器人已运行在完整权限模式，图片检测功能正常！',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        await interaction.reply({
+            content: '🔄 尝试启用完整权限...',
+            flags: MessageFlags.Ephemeral
+        });
+
+        try {
+            // 尝试重新创建客户端并启用完整权限
+            const oldClient = this.client;
+            this.client = this.createClient(true);
+            this.fullPermissions = true;
+            
+            // 重新设置事件监听器
+            this.setupEventHandlers();
+            
+            console.log('🔄 尝试使用完整权限重新连接...');
+            
+            // 先断开旧连接
+            await oldClient.destroy();
+            
+            // 尝试登录新客户端
+            await this.client.login(process.env.DISCORD_TOKEN);
+            
+            await interaction.editReply({
+                content: '✅ 成功启用完整权限！机器人现在可以检测图片了。',
+            });
+            
+        } catch (error) {
+            console.log('⚠️  无法启用完整权限:', error.message);
+            
+            // 回退到基础权限
+            this.fullPermissions = false;
+            this.client = this.createClient(false);
+            this.setupEventHandlers();
+            
+            try {
+                await this.client.login(process.env.DISCORD_TOKEN);
+            } catch (loginError) {
+                console.error('基础权限登录也失败:', loginError);
+            }
+            
+            await interaction.editReply({
+                content: '❌ 无法启用完整权限。请在Discord开发者门户启用 MESSAGE CONTENT INTENT 权限。\n\n' +
+                         '操作步骤:\n' +
+                         '1. 访问 https://discord.com/developers/applications\n' +
+                         '2. 选择您的机器人应用\n' +
+                         '3. 进入 "Bot" 页面\n' +
+                         '4. 启用 "MESSAGE CONTENT INTENT" 开关\n' +
+                         '5. 保存设置并重试'
             });
         }
     }
