@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Collection, Events, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, Events, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, InteractionResponseType, MessageFlags } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const axios = require('axios');
 require('dotenv').config();
@@ -16,6 +16,7 @@ class BochiBot {
                 autoReaction: true,
                 aiComment: true,
                 reactionEmojis: ['👍', '❤️', '🎨', '✨', '🔥'],
+                customEmojis: [], // 存储服务器自定义表情
                 allowedRoles: [] // 存储允许配置的角色ID
             },
             apiSettings: {
@@ -47,7 +48,7 @@ class BochiBot {
                 if (!this.checkPermission(interaction)) {
                     return await interaction.reply({
                         content: '❌ 您没有权限使用此命令。请联系管理员。',
-                        ephemeral: true
+                        flags: MessageFlags.Ephemeral
                     });
                 }
 
@@ -83,7 +84,7 @@ class BochiBot {
                 await interaction.reply({
                     embeds: [embed],
                     components: [row],
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
             }
         };
@@ -106,7 +107,7 @@ class BochiBot {
                         await command.execute(interaction);
                     } catch (error) {
                         console.error('命令执行错误:', error);
-                        const reply = { content: '执行命令时发生错误！', ephemeral: true };
+                        const reply = { content: '执行命令时发生错误！', flags: MessageFlags.Ephemeral };
                         if (interaction.replied || interaction.deferred) {
                             await interaction.followUp(reply);
                         } else {
@@ -150,7 +151,7 @@ class BochiBot {
         if (!this.checkPermission(interaction)) {
             return await interaction.reply({
                 content: '❌ 您没有权限使用此功能。',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -187,6 +188,9 @@ class BochiBot {
             case 'get_models':
                 await this.fetchAvailableModels(interaction);
                 break;
+            case 'get_server_emojis':
+                await this.getServerEmojis(interaction);
+                break;
         }
     }
 
@@ -197,10 +201,11 @@ class BochiBot {
             .addFields(
                 { name: '🎨 自动图片反应', value: this.config.botSettings.autoReaction ? '✅ 开启' : '❌ 关闭', inline: true },
                 { name: '💬 AI图片点评', value: this.config.botSettings.aiComment ? '✅ 开启' : '❌ 关闭', inline: true },
-                { name: '😊 反应表情', value: this.config.botSettings.reactionEmojis.join(' '), inline: false }
+                { name: '😊 标准表情', value: this.config.botSettings.reactionEmojis.join(' '), inline: false },
+                { name: '🎭 服务器表情', value: this.config.botSettings.customEmojis.length > 0 ? this.config.botSettings.customEmojis.join(' ') : '无', inline: false }
             );
 
-        const row = new ActionRowBuilder()
+        const row1 = new ActionRowBuilder()
             .addComponents(
                 new ButtonBuilder()
                     .setCustomId('toggle_reaction')
@@ -209,16 +214,24 @@ class BochiBot {
                 new ButtonBuilder()
                     .setCustomId('toggle_comment')
                     .setLabel(this.config.botSettings.aiComment ? '关闭点评' : '开启点评')
-                    .setStyle(this.config.botSettings.aiComment ? ButtonStyle.Danger : ButtonStyle.Success),
+                    .setStyle(this.config.botSettings.aiComment ? ButtonStyle.Danger : ButtonStyle.Success)
+            );
+
+        const row2 = new ActionRowBuilder()
+            .addComponents(
                 new ButtonBuilder()
                     .setCustomId('edit_emojis')
-                    .setLabel('编辑表情')
-                    .setStyle(ButtonStyle.Secondary)
+                    .setLabel('编辑标准表情')
+                    .setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder()
+                    .setCustomId('get_server_emojis')
+                    .setLabel('获取服务器表情')
+                    .setStyle(ButtonStyle.Primary)
             );
 
         await interaction.update({
             embeds: [embed],
-            components: [row]
+            components: [row1, row2]
         });
     }
 
@@ -408,7 +421,7 @@ class BochiBot {
         if (!this.checkPermission(interaction)) {
             return await interaction.reply({
                 content: '❌ 您没有权限使用此功能。',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -436,7 +449,7 @@ class BochiBot {
         if (!this.checkPermission(interaction)) {
             return await interaction.reply({
                 content: '❌ 您没有权限使用此功能。',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -457,7 +470,7 @@ class BochiBot {
                 
                 await interaction.reply({
                     content: '✅ Gemini配置已更新！',
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
                 break;
 
@@ -472,7 +485,7 @@ class BochiBot {
                 
                 await interaction.reply({
                     content: '✅ OpenAI配置已更新！',
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
                 break;
 
@@ -484,7 +497,7 @@ class BochiBot {
                 
                 await interaction.reply({
                     content: '✅ 表情配置已更新！',
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
                 break;
         }
@@ -493,13 +506,27 @@ class BochiBot {
     async handleImageMessage(message, attachment) {
         // 自动反应功能
         if (this.config.botSettings.autoReaction) {
-            const randomEmoji = this.config.botSettings.reactionEmojis[
-                Math.floor(Math.random() * this.config.botSettings.reactionEmojis.length)
-            ];
-            try {
-                await message.react(randomEmoji);
-            } catch (error) {
-                console.error('添加反应失败:', error);
+            // 合并标准表情和自定义表情
+            const allEmojis = [...this.config.botSettings.reactionEmojis, ...this.config.botSettings.customEmojis];
+            
+            if (allEmojis.length > 0) {
+                const randomEmoji = allEmojis[Math.floor(Math.random() * allEmojis.length)];
+                try {
+                    await message.react(randomEmoji);
+                } catch (error) {
+                    console.error('添加反应失败:', error);
+                    // 如果是自定义表情失败，尝试使用标准表情
+                    if (this.config.botSettings.reactionEmojis.length > 0) {
+                        const fallbackEmoji = this.config.botSettings.reactionEmojis[
+                            Math.floor(Math.random() * this.config.botSettings.reactionEmojis.length)
+                        ];
+                        try {
+                            await message.react(fallbackEmoji);
+                        } catch (fallbackError) {
+                            console.error('备用表情也失败:', fallbackError);
+                        }
+                    }
+                }
             }
         }
 
@@ -616,7 +643,7 @@ class BochiBot {
     }
 
     async testApiConnection(interaction) {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         let testResult = '';
 
@@ -664,7 +691,7 @@ class BochiBot {
     }
 
     async fetchAvailableModels(interaction) {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         let result = '';
 
@@ -703,6 +730,32 @@ class BochiBot {
         }
 
         await interaction.editReply({ content: result });
+    }
+
+    async getServerEmojis(interaction) {
+        const guild = interaction.guild;
+        const emojis = guild.emojis.cache;
+
+        if (emojis.size === 0) {
+            await interaction.reply({
+                content: '❌ 这个服务器没有自定义表情。',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        // 获取所有可用的自定义表情
+        const emojiList = emojis.map(emoji => `<:${emoji.name}:${emoji.id}>`);
+        
+        // 更新配置
+        this.config.botSettings.customEmojis = emojiList;
+
+        await interaction.reply({
+            content: `✅ 已成功获取 ${emojiList.length} 个服务器表情！\n\n` +
+                     `表情列表: ${emojiList.slice(0, 10).join(' ')}` +
+                     (emojiList.length > 10 ? ` 等${emojiList.length}个...` : ''),
+            flags: MessageFlags.Ephemeral
+        });
     }
 
     checkPermission(interaction) {
