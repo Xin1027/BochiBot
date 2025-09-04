@@ -8,10 +8,12 @@
 
 - **智能图片识别**: 自动检测频道中的图片并进行处理
 - **AI点评系统**: 使用Gemini或OpenAI API对图片进行友好的点评
-- **自动表情反应**: 对精美图片自动添加表情反应
+- **自动表情反应**: 对精美图片自动添加表情反应（支持标准表情和服务器自定义表情）
+- **服务器表情管理**: 扫描→选择→确认的表情配置流程
 - **权限控制**: 支持基于Discord角色的权限管理
 - **多API支持**: 同时支持Gemini和OpenAI API，支持多密钥轮询
 - **模型选择**: 支持动态获取和选择不同的AI模型
+- **自定义AI提示词**: 可配置AI点评的风格和内容
 - **Discord原生交互**: 使用Discord的按钮、选择菜单、模态框等原生组件进行配置
 
 ## 机器人设置指南
@@ -21,8 +23,8 @@
 1. 访问 https://discord.com/developers/applications
 2. 创建新应用或选择现有应用
 3. 在"Bot"页面中：
-   - 启用"MESSAGE CONTENT INTENT"
-   - 启用"SERVER MEMBERS INTENT"（可选）
+   - **必须启用**: "MESSAGE CONTENT INTENT" (用于检测图片消息)
+   - **必须启用**: "SERVER MEMBERS INTENT" (可选，但建议开启)
 4. 复制Bot Token并在Replit中设置为DISCORD_TOKEN密钥
 5. 在"OAuth2 > URL Generator"中：
    - 选择"bot"和"applications.commands"作用域
@@ -32,7 +34,13 @@
      - Add Reactions
      - Attach Files
      - Read Message History
+     - Use External Emojis
+     - Manage Messages (可选)
    - 使用生成的URL邀请机器人到服务器
+
+### 💡 重要提示
+- 如果没有启用MESSAGE CONTENT INTENT，机器人无法自动检测和反应图片
+- 当前机器人使用基础权限运行，配置功能正常，但图片反应功能需要上述权限才能工作
 
 ### 2. 机器人权限配置
 

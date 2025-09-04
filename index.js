@@ -18,6 +18,8 @@ class BochiBot {
                 aiComment: true,
                 reactionEmojis: ['👍', '❤️', '🎨', '✨', '🔥'],
                 customEmojis: [], // 存储服务器自定义表情
+                serverEmojisCache: [], // 缓存所有服务器表情
+                selectedServerEmojis: [], // 用户选择的服务器表情
                 allowedRoles: [], // 存储允许配置的角色ID
                 aiPrompt: '请用中文对这张图片进行简短的正面点评，语气要友好温馨，就像可爱的小狗波奇在夸奖主人一样。点评要真诚且具体，不要过于夸张。请控制在50字以内。' // AI点评提示词
             },
@@ -214,8 +216,34 @@ class BochiBot {
             case 'get_models':
                 await this.fetchAvailableModels(interaction);
                 break;
+            case 'confirm_emoji_selection':
+                if (this.tempSelectedEmojis) {
+                    this.config.botSettings.selectedServerEmojis = [...this.tempSelectedEmojis];
+                    this.tempSelectedEmojis = null;
+                    await interaction.reply({
+                        content: `✅ 已确认选择 ${this.config.botSettings.selectedServerEmojis.length} 个服务器表情用于反应！`,
+                        flags: MessageFlags.Ephemeral
+                    });
+                } else {
+                    await interaction.reply({
+                        content: '❌ 请先选择表情。',
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
+                break;
+            case 'clear_emoji_selection':
+                this.config.botSettings.selectedServerEmojis = [];
+                this.tempSelectedEmojis = null;
+                await interaction.reply({
+                    content: '✅ 已清除所有选择的服务器表情。',
+                    flags: MessageFlags.Ephemeral
+                });
+                break;
             case 'get_server_emojis':
                 await this.getServerEmojis(interaction);
+                break;
+            case 'select_server_emojis':
+                await this.showServerEmojiSelection(interaction);
                 break;
         }
     }
@@ -228,7 +256,7 @@ class BochiBot {
                 { name: '🎨 自动图片反应', value: this.config.botSettings.autoReaction ? '✅ 开启' : '❌ 关闭', inline: true },
                 { name: '💬 AI图片点评', value: this.config.botSettings.aiComment ? '✅ 开启' : '❌ 关闭', inline: true },
                 { name: '😊 标准表情', value: this.config.botSettings.reactionEmojis.join(' '), inline: false },
-                { name: '🎭 服务器表情', value: this.config.botSettings.customEmojis.length > 0 ? this.config.botSettings.customEmojis.join(' ') : '无', inline: false }
+                { name: '🎭 已选服务器表情', value: this.config.botSettings.selectedServerEmojis.length > 0 ? this.config.botSettings.selectedServerEmojis.slice(0, 8).join(' ') + (this.config.botSettings.selectedServerEmojis.length > 8 ? '...' : '') : '无', inline: false }
             );
 
         const row1 = new ActionRowBuilder()
@@ -251,7 +279,7 @@ class BochiBot {
                     .setStyle(ButtonStyle.Secondary),
                 new ButtonBuilder()
                     .setCustomId('get_server_emojis')
-                    .setLabel('获取服务器表情')
+                    .setLabel('扫描服务器表情')
                     .setStyle(ButtonStyle.Primary),
                 new ButtonBuilder()
                     .setCustomId('edit_ai_prompt')
@@ -259,9 +287,18 @@ class BochiBot {
                     .setStyle(ButtonStyle.Success)
             );
 
+        const row3 = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('select_server_emojis')
+                    .setLabel('选择服务器表情')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(this.config.botSettings.serverEmojisCache.length === 0)
+            );
+
         await interaction.update({
             embeds: [embed],
-            components: [row1, row2]
+            components: [row1, row2, row3]
         });
     }
 
@@ -500,6 +537,14 @@ class BochiBot {
                 this.config.apiSettings.openaiModel = interaction.values[0];
                 await this.showApiSettings(interaction);
                 break;
+            case 'emoji_selection_menu':
+                // 临时存储选择的表情
+                this.tempSelectedEmojis = interaction.values;
+                await interaction.reply({
+                    content: `✅ 已选择 ${interaction.values.length} 个表情，请点击"确认选择"来应用更改。`,
+                    flags: MessageFlags.Ephemeral
+                });
+                break;
         }
     }
 
@@ -582,13 +627,14 @@ class BochiBot {
     async handleImageMessage(message, attachment) {
         // 自动反应功能
         if (this.config.botSettings.autoReaction) {
-            // 合并标准表情和自定义表情
-            const allEmojis = [...this.config.botSettings.reactionEmojis, ...this.config.botSettings.customEmojis];
+            // 合并标准表情和选择的服务器表情
+            const allEmojis = [...this.config.botSettings.reactionEmojis, ...this.config.botSettings.selectedServerEmojis];
             
             if (allEmojis.length > 0) {
                 const randomEmoji = allEmojis[Math.floor(Math.random() * allEmojis.length)];
                 try {
                     await message.react(randomEmoji);
+                    console.log(`成功对图片添加反应: ${randomEmoji}`);
                 } catch (error) {
                     console.error('添加反应失败:', error);
                     // 如果是自定义表情失败，尝试使用标准表情
@@ -598,6 +644,7 @@ class BochiBot {
                         ];
                         try {
                             await message.react(fallbackEmoji);
+                            console.log(`使用备用表情成功: ${fallbackEmoji}`);
                         } catch (fallbackError) {
                             console.error('备用表情也失败:', fallbackError);
                         }
@@ -838,13 +885,14 @@ class BochiBot {
                 }
             });
             
-            // 更新配置
-            this.config.botSettings.customEmojis = emojiList;
+            // 更新缓存，不直接添加到反应列表
+            this.config.botSettings.serverEmojisCache = emojiList;
 
             await interaction.reply({
-                content: `✅ 已成功获取 ${emojiList.length} 个服务器表情！\n\n` +
+                content: `✅ 已扫描到 ${emojiList.length} 个服务器表情！\n\n` +
                          `表情预览: ${emojiList.slice(0, 8).join(' ')}` +
-                         (emojiList.length > 8 ? ` 等${emojiList.length}个...` : ''),
+                         (emojiList.length > 8 ? ` 等${emojiList.length}个...` : '') + 
+                         `\n\n请点击"选择服务器表情"来选择要用于反应的表情。`,
                 flags: MessageFlags.Ephemeral
             });
         } catch (error) {
@@ -854,6 +902,66 @@ class BochiBot {
                 flags: MessageFlags.Ephemeral
             });
         }
+    }
+
+    async showServerEmojiSelection(interaction) {
+        const cachedEmojis = this.config.botSettings.serverEmojisCache;
+        
+        if (cachedEmojis.length === 0) {
+            await interaction.reply({
+                content: '❌ 请先扫描服务器表情。',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        // 创建表情选择菜单，最多25个选项
+        const maxOptions = Math.min(cachedEmojis.length, 25);
+        const emojiOptions = cachedEmojis.slice(0, maxOptions).map((emoji, index) => {
+            // 提取表情名称
+            const match = emoji.match(/:([^:]+):/);
+            const emojiName = match ? match[1] : `emoji_${index}`;
+            
+            return {
+                label: emojiName,
+                value: emoji,
+                emoji: emoji,
+                default: this.config.botSettings.selectedServerEmojis.includes(emoji)
+            };
+        });
+
+        const embed = new EmbedBuilder()
+            .setColor('#FFB6C1')
+            .setTitle('🎭 选择服务器表情')
+            .setDescription(`从 ${cachedEmojis.length} 个服务器表情中选择要用于反应的表情\n\n` +
+                          `当前已选择: ${this.config.botSettings.selectedServerEmojis.length} 个表情`);
+
+        const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('emoji_selection_menu')
+            .setPlaceholder('选择要用于反应的表情...')
+            .setMinValues(0)
+            .setMaxValues(Math.min(maxOptions, 10))
+            .addOptions(emojiOptions);
+
+        const actionRow = new ActionRowBuilder().addComponents(selectMenu);
+
+        const confirmButton = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('confirm_emoji_selection')
+                    .setLabel('确认选择')
+                    .setStyle(ButtonStyle.Success),
+                new ButtonBuilder()
+                    .setCustomId('clear_emoji_selection')
+                    .setLabel('清除选择')
+                    .setStyle(ButtonStyle.Danger)
+            );
+
+        await interaction.reply({
+            embeds: [embed],
+            components: [actionRow, confirmButton],
+            flags: MessageFlags.Ephemeral
+        });
     }
 
     checkPermission(interaction) {
