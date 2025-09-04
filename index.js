@@ -7,7 +7,8 @@ class BochiBot {
     constructor() {
         this.client = new Client({
             intents: [
-                GatewayIntentBits.Guilds
+                GatewayIntentBits.Guilds,
+                GatewayIntentBits.GuildEmojisAndStickers
             ]
         });
 
@@ -17,7 +18,8 @@ class BochiBot {
                 aiComment: true,
                 reactionEmojis: ['👍', '❤️', '🎨', '✨', '🔥'],
                 customEmojis: [], // 存储服务器自定义表情
-                allowedRoles: [] // 存储允许配置的角色ID
+                allowedRoles: [], // 存储允许配置的角色ID
+                aiPrompt: '请用中文对这张图片进行简短的正面点评，语气要友好温馨，就像可爱的小狗波奇在夸奖主人一样。点评要真诚且具体，不要过于夸张。请控制在50字以内。' // AI点评提示词
             },
             apiSettings: {
                 geminiApiKeys: [],
@@ -197,6 +199,9 @@ class BochiBot {
             case 'edit_emojis':
                 await this.showEmojiModal(interaction);
                 break;
+            case 'edit_ai_prompt':
+                await this.showPromptModal(interaction);
+                break;
             case 'api_gemini_config':
                 await this.showGeminiModal(interaction);
                 break;
@@ -247,7 +252,11 @@ class BochiBot {
                 new ButtonBuilder()
                     .setCustomId('get_server_emojis')
                     .setLabel('获取服务器表情')
-                    .setStyle(ButtonStyle.Primary)
+                    .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                    .setCustomId('edit_ai_prompt')
+                    .setLabel('编辑AI提示词')
+                    .setStyle(ButtonStyle.Success)
             );
 
         await interaction.update({
@@ -285,10 +294,6 @@ class BochiBot {
 
         const row2 = new ActionRowBuilder()
             .addComponents(
-                new ButtonBuilder()
-                    .setCustomId('get_models')
-                    .setLabel('获取可用模型')
-                    .setStyle(ButtonStyle.Secondary),
                 new StringSelectMenuBuilder()
                     .setCustomId('select_api_service')
                     .setPlaceholder('选择AI服务')
@@ -306,9 +311,17 @@ class BochiBot {
                     ])
             );
 
+        const row3 = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('get_models')
+                    .setLabel('获取可用模型')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+
         await interaction.update({
             embeds: [embed],
-            components: [row1, row2]
+            components: [row1, row2, row3]
         });
     }
 
@@ -438,6 +451,25 @@ class BochiBot {
         await interaction.showModal(modal);
     }
 
+    async showPromptModal(interaction) {
+        const modal = new ModalBuilder()
+            .setCustomId('prompt_config_modal')
+            .setTitle('配置AI点评提示词');
+
+        const promptInput = new TextInputBuilder()
+            .setCustomId('ai_prompt')
+            .setLabel('AI点评提示词')
+            .setStyle(TextInputStyle.Paragraph)
+            .setValue(this.config.botSettings.aiPrompt)
+            .setRequired(true);
+
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(promptInput)
+        );
+
+        await interaction.showModal(modal);
+    }
+
     async handleSelectMenuInteraction(interaction) {
         // 检查交互是否还有效
         if (!interaction.isStringSelectMenu() || interaction.replied || interaction.deferred) {
@@ -531,6 +563,19 @@ class BochiBot {
                     flags: MessageFlags.Ephemeral
                 });
                 break;
+
+            case 'prompt_config_modal':
+                const aiPrompt = interaction.fields.getTextInputValue('ai_prompt');
+                
+                if (aiPrompt) {
+                    this.config.botSettings.aiPrompt = aiPrompt;
+                }
+                
+                await interaction.reply({
+                    content: '✅ AI提示词已更新！',
+                    flags: MessageFlags.Ephemeral
+                });
+                break;
         }
     }
 
@@ -599,7 +644,7 @@ class BochiBot {
             const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
             const imageData = Buffer.from(response.data).toString('base64');
 
-            const prompt = "请用中文对这张图片进行简短的正面点评，语气要友好温馨，就像可爱的小狗波奇在夸奖主人一样。点评要真诚且具体，不要过于夸张。请控制在50字以内。";
+            const prompt = this.config.botSettings.aiPrompt;
 
             const result = await model.generateContent([
                 prompt,
@@ -630,7 +675,7 @@ class BochiBot {
                             content: [
                                 {
                                     type: "text",
-                                    text: "请用中文对这张图片进行简短的正面点评，语气要友好温馨，就像可爱的小狗波奇在夸奖主人一样。点评要真诚且具体，不要过于夸张。请控制在50字以内。"
+                                    text: this.config.botSettings.aiPrompt
                                 },
                                 {
                                     type: "image_url",
@@ -764,29 +809,51 @@ class BochiBot {
     }
 
     async getServerEmojis(interaction) {
-        const guild = interaction.guild;
-        const emojis = guild.emojis.cache;
+        try {
+            const guild = interaction.guild;
+            if (!guild) {
+                await interaction.reply({
+                    content: '❌ 无法获取服务器信息。',
+                    flags: MessageFlags.Ephemeral
+                });
+                return;
+            }
 
-        if (emojis.size === 0) {
+            const emojis = guild.emojis.cache;
+
+            if (emojis.size === 0) {
+                await interaction.reply({
+                    content: '❌ 这个服务器没有自定义表情。',
+                    flags: MessageFlags.Ephemeral
+                });
+                return;
+            }
+
+            // 获取所有可用的自定义表情，包括动态表情
+            const emojiList = emojis.map(emoji => {
+                if (emoji.animated) {
+                    return `<a:${emoji.name}:${emoji.id}>`;
+                } else {
+                    return `<:${emoji.name}:${emoji.id}>`;
+                }
+            });
+            
+            // 更新配置
+            this.config.botSettings.customEmojis = emojiList;
+
             await interaction.reply({
-                content: '❌ 这个服务器没有自定义表情。',
+                content: `✅ 已成功获取 ${emojiList.length} 个服务器表情！\n\n` +
+                         `表情预览: ${emojiList.slice(0, 8).join(' ')}` +
+                         (emojiList.length > 8 ? ` 等${emojiList.length}个...` : ''),
                 flags: MessageFlags.Ephemeral
             });
-            return;
+        } catch (error) {
+            console.error('获取服务器表情失败:', error);
+            await interaction.reply({
+                content: '❌ 获取服务器表情时发生错误。',
+                flags: MessageFlags.Ephemeral
+            });
         }
-
-        // 获取所有可用的自定义表情
-        const emojiList = emojis.map(emoji => `<:${emoji.name}:${emoji.id}>`);
-        
-        // 更新配置
-        this.config.botSettings.customEmojis = emojiList;
-
-        await interaction.reply({
-            content: `✅ 已成功获取 ${emojiList.length} 个服务器表情！\n\n` +
-                     `表情列表: ${emojiList.slice(0, 10).join(' ')}` +
-                     (emojiList.length > 10 ? ` 等${emojiList.length}个...` : ''),
-            flags: MessageFlags.Ephemeral
-        });
     }
 
     checkPermission(interaction) {
