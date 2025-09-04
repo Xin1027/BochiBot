@@ -107,11 +107,15 @@ class BochiBot {
                         await command.execute(interaction);
                     } catch (error) {
                         console.error('命令执行错误:', error);
-                        const reply = { content: '执行命令时发生错误！', flags: MessageFlags.Ephemeral };
-                        if (interaction.replied || interaction.deferred) {
-                            await interaction.followUp(reply);
-                        } else {
-                            await interaction.reply(reply);
+                        try {
+                            const reply = { content: '执行命令时发生错误！', flags: MessageFlags.Ephemeral };
+                            if (interaction.replied || interaction.deferred) {
+                                await interaction.followUp(reply);
+                            } else {
+                                await interaction.reply(reply);
+                            }
+                        } catch (followupError) {
+                            console.error('无法发送错误消息:', followupError.message);
                         }
                     }
                 }
@@ -119,17 +123,29 @@ class BochiBot {
 
             // 处理按钮交互
             if (interaction.isButton()) {
-                await this.handleButtonInteraction(interaction);
+                try {
+                    await this.handleButtonInteraction(interaction);
+                } catch (error) {
+                    console.error('按钮交互错误:', error);
+                }
             }
 
             // 处理选择菜单交互
             if (interaction.isStringSelectMenu()) {
-                await this.handleSelectMenuInteraction(interaction);
+                try {
+                    await this.handleSelectMenuInteraction(interaction);
+                } catch (error) {
+                    console.error('选择菜单交互错误:', error);
+                }
             }
 
             // 处理模态框交互
             if (interaction.isModalSubmit()) {
-                await this.handleModalInteraction(interaction);
+                try {
+                    await this.handleModalInteraction(interaction);
+                } catch (error) {
+                    console.error('模态框交互错误:', error);
+                }
             }
         });
 
@@ -148,6 +164,11 @@ class BochiBot {
     }
 
     async handleButtonInteraction(interaction) {
+        // 检查交互是否还有效
+        if (!interaction.isButton() || interaction.replied || interaction.deferred) {
+            return;
+        }
+
         if (!this.checkPermission(interaction)) {
             return await interaction.reply({
                 content: '❌ 您没有权限使用此功能。',
@@ -418,6 +439,11 @@ class BochiBot {
     }
 
     async handleSelectMenuInteraction(interaction) {
+        // 检查交互是否还有效
+        if (!interaction.isStringSelectMenu() || interaction.replied || interaction.deferred) {
+            return;
+        }
+
         if (!this.checkPermission(interaction)) {
             return await interaction.reply({
                 content: '❌ 您没有权限使用此功能。',
@@ -446,6 +472,11 @@ class BochiBot {
     }
 
     async handleModalInteraction(interaction) {
+        // 检查交互是否还有效
+        if (!interaction.isModalSubmit() || interaction.replied || interaction.deferred) {
+            return;
+        }
+
         if (!this.checkPermission(interaction)) {
             return await interaction.reply({
                 content: '❌ 您没有权限使用此功能。',
