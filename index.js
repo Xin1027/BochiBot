@@ -41,7 +41,7 @@ class BochiBot {
     setupCommands() {
         // 波奇面板命令
         const panelCommand = {
-            name: '波奇面板',
+            name: 'bochi',
             description: '打开波奇机器人配置面板',
             execute: async (interaction) => {
                 if (!this.checkPermission(interaction)) {
@@ -721,7 +721,7 @@ class BochiBot {
     async registerSlashCommands() {
         const commands = [
             {
-                name: '波奇面板',
+                name: 'bochi',
                 description: '打开波奇机器人配置面板'
             }
         ];
