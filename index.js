@@ -26,6 +26,7 @@ class BochiBot {
                 aiComment: false,
                 reactionEmojis: ['👍', '❤️', '🎨', '✨', '🔥'],
                 allowedRoles: [], // 全局权限角色（向后兼容）
+                allowedChannels: [], // 允许使用机器人命令的频道ID列表（空表示所有频道）
                 aiPrompt: '请用中文对这张图片进行简短的正面点评，语气要友好温馨。点评要真诚且具体，不要过于夸张。请控制在50字以内。', 
                 channelSettings: {}, // 按频道存储不同的设置 {channelId: {autoReaction: bool, aiComment: bool, ...}}
                 blockedUsers: new Set(), // 不希望被机器人反应的用户ID集合
@@ -114,6 +115,17 @@ class BochiBot {
         return [...this.config.botSettings.reactionEmojis, ...serverConfig.selectedServerEmojis];
     }
 
+    // 检查频道权限（用于全员可用的命令）
+    checkChannelPermission(interaction) {
+        // 如果没有设置任何频道限制，则允许在所有频道使用
+        if (this.config.botSettings.allowedChannels.length === 0) {
+            return true;
+        }
+        
+        // 检查当前频道是否在允许列表中
+        return this.config.botSettings.allowedChannels.includes(interaction.channel.id);
+    }
+
     setupCommands() {
         // 波奇面板命令
         const panelCommand = {
@@ -184,10 +196,19 @@ class BochiBot {
                             .setStyle(ButtonStyle.Danger)
                             .setEmoji('🔒'),
                         new ButtonBuilder()
+                            .setCustomId('channel_allowed_settings')
+                            .setLabel('频道权限')
+                            .setStyle(ButtonStyle.Secondary)
+                            .setEmoji('📋'),
+                        new ButtonBuilder()
                             .setCustomId('blocked_users_management')
                             .setLabel('用户阻止管理')
                             .setStyle(ButtonStyle.Secondary)
-                            .setEmoji('🚫'),
+                            .setEmoji('🚫')
+                    );
+
+                const row2_2 = new ActionRowBuilder()
+                    .addComponents(
                         new ButtonBuilder()
                             .setCustomId('channel_stats')
                             .setLabel('频道统计')
@@ -211,7 +232,7 @@ class BochiBot {
 
                 await interaction.reply({
                     embeds: [embed],
-                    components: [row1, row2, row3],
+                    components: [row1, row2, row2_2, row3],
                     flags: MessageFlags.Ephemeral
                 });
             }
@@ -224,6 +245,14 @@ class BochiBot {
             name: '限制bochi对我做出反应',
             description: '阻止波奇机器人对您的图片做出反应',
             execute: async (interaction) => {
+                // 检查是否在允许的频道中
+                if (!this.checkChannelPermission(interaction)) {
+                    return await interaction.reply({
+                        content: '❌ 此命令在当前频道不可用。',
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
+                
                 this.config.botSettings.blockedUsers.add(interaction.user.id);
                 await interaction.reply({
                     content: '✅ 已设置成功！波奇不会再对您的图片做出反应。',
@@ -236,6 +265,14 @@ class BochiBot {
             name: '允许bochi对我做出反应',
             description: '允许波奇机器人对您的图片做出反应',
             execute: async (interaction) => {
+                // 检查是否在允许的频道中
+                if (!this.checkChannelPermission(interaction)) {
+                    return await interaction.reply({
+                        content: '❌ 此命令在当前频道不可用。',
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
+                
                 this.config.botSettings.blockedUsers.delete(interaction.user.id);
                 await interaction.reply({
                     content: '✅ 已设置成功！波奇现在可以对您的图片做出反应了。',
@@ -414,6 +451,9 @@ class BochiBot {
             case 'permission_settings':
                 await this.showPermissionSettings(interaction);
                 break;
+            case 'channel_allowed_settings':
+                await this.showChannelAllowedSettings(interaction);
+                break;
             case 'toggle_reaction':
                 this.config.botSettings.autoReaction = !this.config.botSettings.autoReaction;
                 await this.showBotSettings(interaction);
@@ -504,6 +544,10 @@ class BochiBot {
                 break;
             case 'help_docs':
                 await this.showHelp(interaction);
+                break;
+            case 'clear_allowed_channels':
+                this.config.botSettings.allowedChannels = [];
+                await this.showChannelAllowedSettings(interaction);
                 break;
             case 'current_channel_settings':
                 await this.showChannelSettings(interaction);
@@ -861,6 +905,76 @@ class BochiBot {
         });
     }
 
+    async showChannelAllowedSettings(interaction) {
+        const guild = interaction.guild;
+        if (!guild) {
+            await interaction.update({
+                content: '❌ 无法获取服务器信息。',
+                embeds: [],
+                components: []
+            });
+            return;
+        }
+
+        const allowedChannels = this.config.botSettings.allowedChannels
+            .map(channelId => {
+                const channel = guild.channels.cache.get(channelId);
+                return channel ? `#${channel.name}` : '未知频道';
+            })
+            .join(', ') || '所有频道';
+
+        // 获取所有可选择的文字频道
+        const allChannels = guild.channels.cache
+            .filter(channel => channel.type === 0) // 只显示文字频道
+            .sort((a, b) => a.position - b.position)
+            .map(channel => channel);
+
+        const embed = new EmbedBuilder()
+            .setColor('#FFB6C1')
+            .setTitle('📋 频道权限设置')
+            .addFields(
+                { name: '📝 允许的频道', value: allowedChannels, inline: false },
+                { name: '📊 频道信息', value: `总频道数: ${allChannels.length}`, inline: false },
+                { name: '💡 说明', value: '设置允许使用机器人命令的频道，空表示所有频道都可以使用', inline: false }
+            );
+
+        const components = [];
+
+        if (allChannels.length > 0) {
+            // 最多显示25个频道
+            const channelsToShow = allChannels.slice(0, 25);
+            
+            const selectMenu = new StringSelectMenuBuilder()
+                .setCustomId('select_allowed_channels')
+                .setPlaceholder('选择允许的频道')
+                .setMaxValues(Math.min(channelsToShow.length, 10))
+                .addOptions(channelsToShow.map(channel => ({
+                    label: `#${channel.name}`,
+                    value: channel.id,
+                    description: `类型: 文字频道`,
+                    default: this.config.botSettings.allowedChannels.includes(channel.id)
+                })));
+
+            components.push(new ActionRowBuilder().addComponents(selectMenu));
+        }
+
+        // 清空按钮
+        const clearRow = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('clear_allowed_channels')
+                    .setLabel('清空频道限制')
+                    .setStyle(ButtonStyle.Danger)
+                    .setEmoji('🗑️')
+            );
+        components.push(clearRow);
+
+        await interaction.update({
+            embeds: [embed],
+            components: components
+        });
+    }
+
     async showGeminiModal(interaction) {
         const modal = new ModalBuilder()
             .setCustomId('gemini_config_modal')
@@ -982,6 +1096,10 @@ class BochiBot {
             case 'select_allowed_roles':
                 this.config.botSettings.allowedRoles = interaction.values;
                 await this.showPermissionSettings(interaction);
+                break;
+            case 'select_allowed_channels':
+                this.config.botSettings.allowedChannels = interaction.values;
+                await this.showChannelAllowedSettings(interaction);
                 break;
             case 'select_gemini_model':
                 this.config.apiSettings.geminiModel = interaction.values[0];
@@ -1798,18 +1916,18 @@ class BochiBot {
         const member = interaction.member;
         if (!member) return false;
         
-        // 首先检查是否有"BOT维护员"角色
+        // 检查是否是服务器主（拥有者）
+        if (member.guild.ownerId === member.id) {
+            return true;
+        }
+        
+        // 检查是否有"BOT维护员"角色
         const botMaintainerRole = member.guild.roles.cache.find(role => role.name === 'BOT维护员');
         if (botMaintainerRole && member.roles.cache.has(botMaintainerRole.id)) {
             return true;
         }
         
-        // 如果没有设置任何角色权限，且没有BOT维护员角色，则只允许管理员
-        if (this.config.botSettings.allowedRoles.length === 0) {
-            return member.permissions.has('Administrator');
-        }
-
-        // 检查用户是否拥有指定的角色
+        // 检查用户是否拥有手动添加的指定角色
         return this.config.botSettings.allowedRoles.some(roleId => 
             member.roles.cache.has(roleId)
         );
