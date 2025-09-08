@@ -320,72 +320,10 @@ class BochiBot {
             }
         };
 
-        // 管理员同步命令
-        const syncAdminCommand = {
-            name: '同步管理员权限',
-            description: '扫描并同步拥有BOT维护员角色的用户到管理员列表',
-            execute: async (interaction) => {
-                // 只有服务器所有者可以使用此命令
-                if (interaction.member.guild.ownerId !== interaction.member.id) {
-                    return await interaction.reply({
-                        content: '❌ 只有服务器所有者可以使用此命令。',
-                        flags: MessageFlags.Ephemeral
-                    });
-                }
-
-                await this.syncBotMaintainerPermissions(interaction);
-            }
-        };
-
-        // 角色调试命令
-        const debugRolesCommand = {
-            name: '调试角色信息',
-            description: '显示服务器角色和用户权限调试信息',
-            execute: async (interaction) => {
-                // 只有服务器所有者可以使用此命令
-                if (interaction.member.guild.ownerId !== interaction.member.id) {
-                    return await interaction.reply({
-                        content: '❌ 只有服务器所有者可以使用此命令。',
-                        flags: MessageFlags.Ephemeral
-                    });
-                }
-
-                await this.showRoleDebugInfo(interaction);
-            }
-        };
-
         this.commands.set(blockCommand.name, blockCommand);
         this.commands.set(unblockCommand.name, unblockCommand);
         this.commands.set(channelCommand.name, channelCommand);
         this.commands.set(statsCommand.name, statsCommand);
-        // 测试权限命令（所有用户可用）
-        const testPermissionCommand = {
-            name: '测试我的权限',
-            description: '测试当前用户是否有机器人管理权限',
-            execute: async (interaction) => {
-                const hasPermission = this.checkPermission(interaction);
-                const member = interaction.member;
-                
-                const embed = new EmbedBuilder()
-                    .setColor(hasPermission ? '#00FF00' : '#FF0000')
-                    .setTitle('🔐 权限测试结果')
-                    .addFields(
-                        { name: '👤 用户', value: `${member.user.username} (${member.id})`, inline: false },
-                        { name: '🔐 管理权限', value: hasPermission ? '✅ 有权限' : '❌ 无权限', inline: true },
-                        { name: '👑 服务器所有者', value: member.guild.ownerId === member.id ? '✅ 是' : '❌ 否', inline: true },
-                        { name: '🎭 用户角色', value: member.roles.cache.map(r => r.name).join(', ') || '无角色', inline: false }
-                    );
-
-                await interaction.reply({
-                    embeds: [embed],
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-        };
-
-        this.commands.set(syncAdminCommand.name, syncAdminCommand);
-        this.commands.set(debugRolesCommand.name, debugRolesCommand);
-        this.commands.set(testPermissionCommand.name, testPermissionCommand);
     }
 
     setupEventHandlers() {
@@ -2011,33 +1949,20 @@ class BochiBot {
     // 检查用户是否有管理员权限（可以使用所有命令）
     checkPermission(interaction) {
         const member = interaction.member;
-        if (!member) {
-            console.log(`权限检查: 无法获取成员信息`);
-            return false;
-        }
-        
-        console.log(`权限检查: 用户 ${member.user.username} (${member.id})`);
+        if (!member) return false;
         
         // 检查是否是服务器主（拥有者）
         if (member.guild.ownerId === member.id) {
-            console.log(`权限检查: ✅ 服务器所有者`);
             return true;
         }
         
-        // 检查是否有"BOT维护员"角色 - 增强版本
-        const allRoles = member.guild.roles.cache.map(role => role.name);
-        console.log(`权限检查: 服务器所有角色: ${allRoles.join(', ')}`);
-        
-        // 尝试多种方式查找BOT维护员角色
+        // 检查是否有"BOT维护员"角色
         const possibleNames = ['BOT维护员', 'Bot维护员', 'bot维护员', 'BOT 维护员', 'Bot 维护员'];
         let botMaintainerRole = null;
         
         for (const roleName of possibleNames) {
             botMaintainerRole = member.guild.roles.cache.find(role => role.name === roleName);
-            if (botMaintainerRole) {
-                console.log(`权限检查: BOT维护员角色找到 "${roleName}" (${botMaintainerRole.id})`);
-                break;
-            }
+            if (botMaintainerRole) break;
         }
         
         // 如果精确匹配失败，尝试包含匹配
@@ -2045,36 +1970,16 @@ class BochiBot {
             botMaintainerRole = member.guild.roles.cache.find(role => 
                 role.name.includes('维护员') || role.name.includes('BOT') || role.name.toLowerCase().includes('maintainer')
             );
-            if (botMaintainerRole) {
-                console.log(`权限检查: 通过模糊匹配找到可能的维护员角色: "${botMaintainerRole.name}" (${botMaintainerRole.id})`);
-            }
         }
         
-        console.log(`权限检查: BOT维护员角色查找最终结果: ${botMaintainerRole ? `找到 "${botMaintainerRole.name}" (${botMaintainerRole.id})` : '未找到'}`);
-        
-        if (botMaintainerRole) {
-            const hasRole = member.roles.cache.has(botMaintainerRole.id);
-            console.log(`权限检查: 用户是否有"${botMaintainerRole.name}"角色: ${hasRole}`);
-            console.log(`权限检查: 用户的所有角色ID: ${member.roles.cache.map(r => r.id).join(', ')}`);
-            if (hasRole) {
-                console.log(`权限检查: ✅ BOT维护员角色验证通过`);
-                return true;
-            }
-        }
-        
-        // 检查用户是否拥有手动添加的指定角色
-        console.log(`权限检查: 检查手动配置的角色列表: ${this.config.botSettings.allowedRoles}`);
-        const hasConfiguredRole = this.config.botSettings.allowedRoles.some(roleId => 
-            member.roles.cache.has(roleId)
-        );
-        
-        if (hasConfiguredRole) {
-            console.log(`权限检查: ✅ 配置角色验证通过`);
+        if (botMaintainerRole && member.roles.cache.has(botMaintainerRole.id)) {
             return true;
         }
         
-        console.log(`权限检查: ❌ 权限不足`);
-        return false;
+        // 检查用户是否拥有手动添加的指定角色
+        return this.config.botSettings.allowedRoles.some(roleId => 
+            member.roles.cache.has(roleId)
+        );
     }
     
     // 检查普通用户是否可以在当前频道使用命令
@@ -2561,24 +2466,6 @@ class BochiBot {
             {
                 name: '允许bochi对我做出反应',
                 description: '允许波奇机器人对您的图片做出反应'
-            },
-            {
-                name: '测试我的权限',
-                description: '测试当前用户是否有机器人管理权限'
-            }
-        ];
-
-        // 仅服务器所有者可用的特殊命令（用于调试和管理）
-        const ownerOnlyCommands = [
-            {
-                name: '同步管理员权限',
-                description: '扫描并同步拥有BOT维护员角色的用户到管理员列表',
-                default_member_permissions: '0' // 只有Discord管理员可见
-            },
-            {
-                name: '调试角色信息',
-                description: '显示服务器角色和用户权限调试信息',
-                default_member_permissions: '0' // 只有Discord管理员可见
             }
         ];
 
@@ -2615,9 +2502,9 @@ class BochiBot {
                     // 注册所有命令
                     await rest.put(
                         Routes.applicationGuildCommands(this.client.user.id, guildId),
-                        { body: [...adminCommands, ...userCommands, ...ownerOnlyCommands] }
+                        { body: [...adminCommands, ...userCommands] }
                     );
-                    console.log(`✅ 在服务器 "${guild.name}" 中注册成功 (管理命令: ${adminCommands.length}, 用户命令: ${userCommands.length}, 所有者命令: ${ownerOnlyCommands.length})`);
+                    console.log(`✅ 在服务器 "${guild.name}" 中注册成功 (管理命令: ${adminCommands.length}, 用户命令: ${userCommands.length})`);
                 } catch (guildError) {
                     console.error(`⚠️  在服务器 "${guild.name}" 中注册失败:`, guildError.message);
                 }
