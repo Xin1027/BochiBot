@@ -320,10 +320,46 @@ class BochiBot {
             }
         };
 
+        // 管理员同步命令
+        const syncAdminCommand = {
+            name: '同步管理员权限',
+            description: '扫描并同步拥有BOT维护员角色的用户到管理员列表',
+            execute: async (interaction) => {
+                // 只有服务器所有者可以使用此命令
+                if (interaction.member.guild.ownerId !== interaction.member.id) {
+                    return await interaction.reply({
+                        content: '❌ 只有服务器所有者可以使用此命令。',
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
+
+                await this.syncBotMaintainerPermissions(interaction);
+            }
+        };
+
+        // 角色调试命令
+        const debugRolesCommand = {
+            name: '调试角色信息',
+            description: '显示服务器角色和用户权限调试信息',
+            execute: async (interaction) => {
+                // 只有服务器所有者可以使用此命令
+                if (interaction.member.guild.ownerId !== interaction.member.id) {
+                    return await interaction.reply({
+                        content: '❌ 只有服务器所有者可以使用此命令。',
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
+
+                await this.showRoleDebugInfo(interaction);
+            }
+        };
+
         this.commands.set(blockCommand.name, blockCommand);
         this.commands.set(unblockCommand.name, unblockCommand);
         this.commands.set(channelCommand.name, channelCommand);
         this.commands.set(statsCommand.name, statsCommand);
+        this.commands.set(syncAdminCommand.name, syncAdminCommand);
+        this.commands.set(debugRolesCommand.name, debugRolesCommand);
     }
 
     setupEventHandlers() {
@@ -1940,23 +1976,48 @@ class BochiBot {
     // 检查用户是否有管理员权限（可以使用所有命令）
     checkPermission(interaction) {
         const member = interaction.member;
-        if (!member) return false;
+        if (!member) {
+            console.log(`权限检查: 无法获取成员信息`);
+            return false;
+        }
+        
+        console.log(`权限检查: 用户 ${member.user.username} (${member.id})`);
         
         // 检查是否是服务器主（拥有者）
         if (member.guild.ownerId === member.id) {
+            console.log(`权限检查: ✅ 服务器所有者`);
             return true;
         }
         
         // 检查是否有"BOT维护员"角色
+        const allRoles = member.guild.roles.cache.map(role => role.name);
+        console.log(`权限检查: 服务器所有角色: ${allRoles.join(', ')}`);
+        
         const botMaintainerRole = member.guild.roles.cache.find(role => role.name === 'BOT维护员');
-        if (botMaintainerRole && member.roles.cache.has(botMaintainerRole.id)) {
-            return true;
+        console.log(`权限检查: BOT维护员角色查找结果: ${botMaintainerRole ? `找到 (${botMaintainerRole.id})` : '未找到'}`);
+        
+        if (botMaintainerRole) {
+            const hasRole = member.roles.cache.has(botMaintainerRole.id);
+            console.log(`权限检查: 用户是否有BOT维护员角色: ${hasRole}`);
+            if (hasRole) {
+                console.log(`权限检查: ✅ BOT维护员角色验证通过`);
+                return true;
+            }
         }
         
         // 检查用户是否拥有手动添加的指定角色
-        return this.config.botSettings.allowedRoles.some(roleId => 
+        console.log(`权限检查: 检查手动配置的角色列表: ${this.config.botSettings.allowedRoles}`);
+        const hasConfiguredRole = this.config.botSettings.allowedRoles.some(roleId => 
             member.roles.cache.has(roleId)
         );
+        
+        if (hasConfiguredRole) {
+            console.log(`权限检查: ✅ 配置角色验证通过`);
+            return true;
+        }
+        
+        console.log(`权限检查: ❌ 权限不足`);
+        return false;
     }
     
     // 检查普通用户是否可以在当前频道使用命令
@@ -2006,6 +2067,151 @@ class BochiBot {
             }
         } catch (error) {
             console.error('安全错误回复失败:', error.message);
+        }
+    }
+
+    // 同步BOT维护员角色的用户到管理员列表
+    async syncBotMaintainerPermissions(interaction) {
+        try {
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+            
+            const guild = interaction.guild;
+            
+            // 查找BOT维护员角色
+            const botMaintainerRole = guild.roles.cache.find(role => role.name === 'BOT维护员');
+            
+            if (!botMaintainerRole) {
+                return await interaction.editReply({
+                    content: '❌ 在此服务器中未找到"BOT维护员"角色。请检查角色名称是否正确。'
+                });
+            }
+            
+            // 获取所有拥有BOT维护员角色的成员
+            const maintainerMembers = botMaintainerRole.members;
+            
+            if (maintainerMembers.size === 0) {
+                return await interaction.editReply({
+                    content: '⚠️ 没有用户拥有"BOT维护员"角色。'
+                });
+            }
+            
+            // 添加这些用户到管理员角色列表中
+            const newAdmins = [];
+            maintainerMembers.forEach(member => {
+                if (!this.config.botSettings.allowedRoles.includes(member.user.id)) {
+                    this.config.botSettings.allowedRoles.push(member.user.id);
+                    newAdmins.push(member.user.username);
+                }
+            });
+            
+            // 创建报告
+            const embed = new EmbedBuilder()
+                .setColor('#00FF00')
+                .setTitle('✅ 管理员权限同步完成')
+                .addFields(
+                    {
+                        name: '🎯 发现的BOT维护员',
+                        value: maintainerMembers.map(m => `<@${m.user.id}>`).join('\n') || '无',
+                        inline: false
+                    },
+                    {
+                        name: '➕ 新增的管理员',
+                        value: newAdmins.join('\n') || '无（所有用户已是管理员）',
+                        inline: false
+                    },
+                    {
+                        name: '📊 当前管理员总数',
+                        value: this.config.botSettings.allowedRoles.length.toString(),
+                        inline: true
+                    }
+                )
+                .setFooter({ text: '现在这些用户可以使用所有机器人管理功能' });
+            
+            await interaction.editReply({
+                embeds: [embed]
+            });
+            
+        } catch (error) {
+            console.error('同步管理员权限时出错:', error);
+            await this.safeReplyError(interaction, '同步管理员权限时发生错误！');
+        }
+    }
+
+    // 显示角色调试信息
+    async showRoleDebugInfo(interaction) {
+        try {
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+            
+            const guild = interaction.guild;
+            const member = interaction.member;
+            
+            // 获取所有角色
+            const allRoles = guild.roles.cache.map(role => `${role.name} (${role.id})`);
+            
+            // 查找BOT维护员角色
+            const botMaintainerRole = guild.roles.cache.find(role => role.name === 'BOT维护员');
+            
+            // 获取用户的角色
+            const userRoles = member.roles.cache.map(role => `${role.name} (${role.id})`);
+            
+            // 获取配置的管理员角色
+            const configuredAdmins = this.config.botSettings.allowedRoles;
+            
+            const embed = new EmbedBuilder()
+                .setColor('#FFB6C1')
+                .setTitle('🔍 角色调试信息')
+                .addFields(
+                    {
+                        name: '👤 当前用户信息',
+                        value: `用户: ${member.user.username}\nID: ${member.id}\n是否为服务器所有者: ${guild.ownerId === member.id ? '是' : '否'}`,
+                        inline: false
+                    },
+                    {
+                        name: '🎭 用户拥有的角色',
+                        value: userRoles.join('\n') || '无角色',
+                        inline: false
+                    },
+                    {
+                        name: '🤖 BOT维护员角色状态',
+                        value: botMaintainerRole ? 
+                            `✅ 找到角色\n角色ID: ${botMaintainerRole.id}\n拥有此角色的用户数: ${botMaintainerRole.members.size}\n当前用户是否拥有: ${member.roles.cache.has(botMaintainerRole.id) ? '是' : '否'}` :
+                            '❌ 未找到"BOT维护员"角色',
+                        inline: false
+                    },
+                    {
+                        name: '⚙️ 配置的管理员ID列表',
+                        value: configuredAdmins.length > 0 ? configuredAdmins.join('\n') : '无',
+                        inline: false
+                    },
+                    {
+                        name: '🔐 权限检查结果',
+                        value: this.checkPermission(interaction) ? '✅ 有管理员权限' : '❌ 无管理员权限',
+                        inline: false
+                    }
+                );
+            
+            // 只显示前10个角色，避免消息过长
+            if (allRoles.length > 10) {
+                embed.addFields({
+                    name: '🎭 服务器所有角色 (前10个)',
+                    value: allRoles.slice(0, 10).join('\n') + `\n...还有${allRoles.length - 10}个角色`,
+                    inline: false
+                });
+            } else {
+                embed.addFields({
+                    name: '🎭 服务器所有角色',
+                    value: allRoles.join('\n') || '无角色',
+                    inline: false
+                });
+            }
+            
+            await interaction.editReply({
+                embeds: [embed]
+            });
+            
+        } catch (error) {
+            console.error('显示角色调试信息时出错:', error);
+            await this.safeReplyError(interaction, '获取角色调试信息时发生错误！');
         }
     }
 
