@@ -22,8 +22,8 @@ class BochiBot {
 
         this.config = {
             botSettings: {
-                autoReaction: true,
-                aiComment: true,
+                autoReaction: false,
+                aiComment: false,
                 reactionEmojis: ['👍', '❤️', '🎨', '✨', '🔥'],
                 allowedRoles: [], // 全局权限角色（向后兼容）
                 aiPrompt: '请用中文对这张图片进行简短的正面点评，语气要友好温馨。点评要真诚且具体，不要过于夸张。请控制在50字以内。', 
@@ -1795,13 +1795,21 @@ class BochiBot {
     }
 
     checkPermission(interaction) {
-        // 如果没有设置任何角色权限，则默认允许所有人使用
-        if (this.config.botSettings.allowedRoles.length === 0) {
+        const member = interaction.member;
+        if (!member) return false;
+        
+        // 首先检查是否有"BOT维护员"角色
+        const botMaintainerRole = member.guild.roles.cache.find(role => role.name === 'BOT维护员');
+        if (botMaintainerRole && member.roles.cache.has(botMaintainerRole.id)) {
             return true;
+        }
+        
+        // 如果没有设置任何角色权限，且没有BOT维护员角色，则只允许管理员
+        if (this.config.botSettings.allowedRoles.length === 0) {
+            return member.permissions.has('Administrator');
         }
 
         // 检查用户是否拥有指定的角色
-        const member = interaction.member;
         return this.config.botSettings.allowedRoles.some(roleId => 
             member.roles.cache.has(roleId)
         );
@@ -2100,6 +2108,17 @@ class BochiBot {
 
         try {
             console.log('开始注册斜杠命令...');
+            
+            // 先清除所有现有的全局命令以避免重复
+            await rest.put(
+                Routes.applicationCommands(this.client.user.id),
+                { body: [] }
+            );
+            console.log('🧹 已清除现有命令');
+            
+            // 稍等片刻再注册新命令
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
             await rest.put(
                 Routes.applicationCommands(this.client.user.id),
                 { body: commands }
