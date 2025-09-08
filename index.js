@@ -1989,16 +1989,38 @@ class BochiBot {
             return true;
         }
         
-        // 检查是否有"BOT维护员"角色
+        // 检查是否有"BOT维护员"角色 - 增强版本
         const allRoles = member.guild.roles.cache.map(role => role.name);
         console.log(`权限检查: 服务器所有角色: ${allRoles.join(', ')}`);
         
-        const botMaintainerRole = member.guild.roles.cache.find(role => role.name === 'BOT维护员');
-        console.log(`权限检查: BOT维护员角色查找结果: ${botMaintainerRole ? `找到 (${botMaintainerRole.id})` : '未找到'}`);
+        // 尝试多种方式查找BOT维护员角色
+        const possibleNames = ['BOT维护员', 'Bot维护员', 'bot维护员', 'BOT 维护员', 'Bot 维护员'];
+        let botMaintainerRole = null;
+        
+        for (const roleName of possibleNames) {
+            botMaintainerRole = member.guild.roles.cache.find(role => role.name === roleName);
+            if (botMaintainerRole) {
+                console.log(`权限检查: BOT维护员角色找到 "${roleName}" (${botMaintainerRole.id})`);
+                break;
+            }
+        }
+        
+        // 如果精确匹配失败，尝试包含匹配
+        if (!botMaintainerRole) {
+            botMaintainerRole = member.guild.roles.cache.find(role => 
+                role.name.includes('维护员') || role.name.includes('BOT') || role.name.toLowerCase().includes('maintainer')
+            );
+            if (botMaintainerRole) {
+                console.log(`权限检查: 通过模糊匹配找到可能的维护员角色: "${botMaintainerRole.name}" (${botMaintainerRole.id})`);
+            }
+        }
+        
+        console.log(`权限检查: BOT维护员角色查找最终结果: ${botMaintainerRole ? `找到 "${botMaintainerRole.name}" (${botMaintainerRole.id})` : '未找到'}`);
         
         if (botMaintainerRole) {
             const hasRole = member.roles.cache.has(botMaintainerRole.id);
-            console.log(`权限检查: 用户是否有BOT维护员角色: ${hasRole}`);
+            console.log(`权限检查: 用户是否有"${botMaintainerRole.name}"角色: ${hasRole}`);
+            console.log(`权限检查: 用户的所有角色ID: ${member.roles.cache.map(r => r.id).join(', ')}`);
             if (hasRole) {
                 console.log(`权限检查: ✅ BOT维护员角色验证通过`);
                 return true;
