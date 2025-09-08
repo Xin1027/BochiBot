@@ -29,7 +29,7 @@ class BochiBot {
                 serverEmojisCache: [], // 缓存所有服务器表情
                 selectedServerEmojis: [], // 用户选择的服务器表情
                 allowedRoles: [], // 存储允许配置的角色ID
-                aiPrompt: '请用中文对这张图片进行简短的正面点评，语气要友好温馨，就像可爱的小狗波奇在夸奖主人一样。点评要真诚且具体，不要过于夸张。请控制在50字以内。', // AI点评提示词
+                aiPrompt: '请用中文对这张图片进行简短的正面点评，语气要友好温馨。点评要真诚且具体，不要过于夸张。请控制在50字以内。', 
                 channelSettings: {}, // 按频道存储不同的设置 {channelId: {autoReaction: bool, aiComment: bool, ...}}
                 blockedUsers: new Set(), // 不希望被机器人反应的用户ID集合
                 channelStats: {} // 频道统计信息 {channelId: {name: string, reactionCount: number, lastUpdate: Date}}
