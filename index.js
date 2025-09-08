@@ -284,7 +284,7 @@ class BochiBot {
             console.log(`   - 图片反应: ${this.config.botSettings.autoReaction ? '开启' : '关闭'}`);
             console.log(`   - AI点评: ${this.config.botSettings.aiComment ? '开启' : '关闭'}`);
             console.log(`   - 标准表情数量: ${this.config.botSettings.reactionEmojis.length}`);
-            console.log(`   - 已选服务器表情数量: ${this.config.botSettings.selectedServerEmojis.length}`);
+            console.log(`   - 服务器配置数量: ${Object.keys(this.config.botSettings.serverConfigs).length}`);
             if (this.fullPermissions) {
                 console.log(`🚀 正在监听消息和图片...`);
             } else {
