@@ -220,8 +220,6 @@ class BochiBot {
             }
         };
 
-        this.commands.set(panelCommand.name, panelCommand);
-
         // 用户反应控制命令
         const blockCommand = {
             name: '限制bochi对我做出反应',
@@ -276,10 +274,12 @@ class BochiBot {
             }
         };
 
-        this.commands.set(blockCommand.name, blockCommand);
-        this.commands.set(unblockCommand.name, unblockCommand);
-        this.commands.set(channelCommand.name, channelCommand);
-        this.commands.set(statsCommand.name, statsCommand);
+        // 注册命令处理函数到本地集合
+        this.commands.set('bochi', panelCommand);
+        this.commands.set('限制bochi对我做出反应', blockCommand);
+        this.commands.set('允许bochi对我做出反应', unblockCommand);
+        this.commands.set('频道设置', channelCommand);
+        this.commands.set('频道统计', statsCommand);
     }
 
     setupEventHandlers() {
@@ -1793,16 +1793,27 @@ class BochiBot {
     }
 
     checkPermission(interaction) {
-        // 如果没有设置任何角色权限，则默认允许所有人使用
-        if (this.config.botSettings.allowedRoles.length === 0) {
+        const member = interaction.member;
+        
+        // 检查用户是否是服务器管理员
+        if (member.permissions.has('Administrator')) {
             return true;
         }
-
+        
+        // 检查用户是否拥有服务器管理权限
+        if (member.permissions.has('ManageGuild')) {
+            return true;
+        }
+        
         // 检查用户是否拥有指定的角色
-        const member = interaction.member;
-        return this.config.botSettings.allowedRoles.some(roleId => 
-            member.roles.cache.has(roleId)
-        );
+        if (this.config.botSettings.allowedRoles.length > 0) {
+            return this.config.botSettings.allowedRoles.some(roleId => 
+                member.roles.cache.has(roleId)
+            );
+        }
+        
+        // 如果没有设置任何角色且不是管理员，则拒绝访问
+        return false;
     }
 
     async showSystemManage(interaction) {
