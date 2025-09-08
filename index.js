@@ -100,7 +100,9 @@ class BochiBot {
                 selectedServerEmojis: [], // 用户选择的服务器表情
                 allowedRoles: [], // 存储允许配置的角色ID
                 emojiPageIndex: 0, // 表情选择页面索引
-                tempSelectedEmojis: [] // 临时选择的表情
+                tempSelectedEmojis: [], // 临时选择的表情
+                rolePageIndex: 0, // 角色选择页面索引
+                rolesCache: [] // 缓存服务器角色列表
             };
         }
         return this.config.botSettings.serverConfigs[guildId];
@@ -583,6 +585,38 @@ class BochiBot {
                     }
                 }
                 break;
+            case 'role_prev_page':
+                const rolePrevGuild = interaction.guild;
+                if (rolePrevGuild) {
+                    const rolePrevServerConfig = this.getServerConfig(rolePrevGuild.id);
+                    if (rolePrevServerConfig.rolePageIndex > 0) {
+                        rolePrevServerConfig.rolePageIndex--;
+                    }
+                    await this.showPermissionSettings(interaction);
+                }
+                break;
+            case 'role_next_page':
+                const roleNextGuild = interaction.guild;
+                if (roleNextGuild) {
+                    const roleNextServerConfig = this.getServerConfig(roleNextGuild.id);
+                    const rolesPerPage = 25;
+                    const totalRolePages = Math.ceil(roleNextServerConfig.rolesCache.length / rolesPerPage);
+                    if (roleNextServerConfig.rolePageIndex < totalRolePages - 1) {
+                        roleNextServerConfig.rolePageIndex++;
+                    }
+                    await this.showPermissionSettings(interaction);
+                }
+                break;
+            case 'role_refresh_list':
+                const roleRefreshGuild = interaction.guild;
+                if (roleRefreshGuild) {
+                    const roleRefreshServerConfig = this.getServerConfig(roleRefreshGuild.id);
+                    // 清空缓存，重新获取角色列表
+                    roleRefreshServerConfig.rolesCache = [];
+                    roleRefreshServerConfig.rolePageIndex = 0;
+                    await this.showPermissionSettings(interaction);
+                }
+                break;
         }
         
         // 处理频道特定的按钮（动态ID）
@@ -741,47 +775,90 @@ class BochiBot {
 
     async showPermissionSettings(interaction) {
         const guild = interaction.guild;
+        if (!guild) {
+            await interaction.update({
+                content: '❌ 无法获取服务器信息。',
+                embeds: [],
+                components: []
+            });
+            return;
+        }
+
+        const serverConfig = this.getServerConfig(guild.id);
         const allowedRoles = this.config.botSettings.allowedRoles
             .map(roleId => guild.roles.cache.get(roleId)?.name || '未知角色')
             .join(', ') || '无';
+
+        // 获取所有可选择的角色并缓存
+        const allRoles = guild.roles.cache
+            .filter(role => !role.managed && role.id !== guild.id)
+            .sort((a, b) => b.position - a.position) // 按权限位置排序
+            .map(role => role);
+
+        if (serverConfig.rolesCache.length === 0 && allRoles.length > 0) {
+            serverConfig.rolesCache = allRoles;
+        }
+
+        const rolesPerPage = 25;
+        const pageIndex = serverConfig.rolePageIndex || 0;
+        const totalPages = Math.ceil(serverConfig.rolesCache.length / rolesPerPage);
+        const startIndex = pageIndex * rolesPerPage;
+        const endIndex = Math.min(startIndex + rolesPerPage, serverConfig.rolesCache.length);
+        
+        const currentPageRoles = serverConfig.rolesCache.slice(startIndex, endIndex);
 
         const embed = new EmbedBuilder()
             .setColor('#FFB6C1')
             .setTitle('🔒 权限设置')
             .addFields(
                 { name: '👥 允许的角色', value: allowedRoles, inline: false },
+                { name: '📊 角色信息', value: `总角色数: ${serverConfig.rolesCache.length}\n当前页面: ${pageIndex + 1}/${totalPages} (显示 ${startIndex + 1}-${endIndex})`, inline: false },
                 { name: '💡 说明', value: '只有拥有指定角色的用户才能使用机器人配置功能', inline: false }
             );
 
-        // 创建角色选择菜单
-        const roles = guild.roles.cache
-            .filter(role => !role.managed && role.id !== guild.id)
-            .first(25); // Discord限制最多25个选项
+        const components = [];
 
-        if (roles.length > 0) {
+        if (currentPageRoles.length > 0) {
             const selectMenu = new StringSelectMenuBuilder()
                 .setCustomId('select_allowed_roles')
                 .setPlaceholder('选择允许的角色')
-                .setMaxValues(Math.min(roles.length, 10))
-                .addOptions(roles.map(role => ({
+                .setMaxValues(Math.min(currentPageRoles.length, 10))
+                .addOptions(currentPageRoles.map(role => ({
                     label: role.name,
                     value: role.id,
-                    description: `成员数: ${role.members.size}`,
+                    description: `成员数: ${role.members.size} | 位置: ${role.position}`,
                     default: this.config.botSettings.allowedRoles.includes(role.id)
                 })));
 
-            const row = new ActionRowBuilder().addComponents(selectMenu);
+            components.push(new ActionRowBuilder().addComponents(selectMenu));
 
-            await interaction.update({
-                embeds: [embed],
-                components: [row]
-            });
-        } else {
-            await interaction.update({
-                embeds: [embed],
-                components: []
-            });
+            // 分页按钮
+            if (totalPages > 1) {
+                const navigationRow = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId('role_prev_page')
+                            .setLabel('上一页')
+                            .setStyle(ButtonStyle.Secondary)
+                            .setDisabled(pageIndex === 0),
+                        new ButtonBuilder()
+                            .setCustomId('role_next_page')
+                            .setLabel('下一页')
+                            .setStyle(ButtonStyle.Secondary)
+                            .setDisabled(pageIndex >= totalPages - 1),
+                        new ButtonBuilder()
+                            .setCustomId('role_refresh_list')
+                            .setLabel('刷新角色列表')
+                            .setStyle(ButtonStyle.Primary)
+                    );
+                components.push(navigationRow);
+            }
         }
+
+        await interaction.update({
+            embeds: [embed],
+            components: components
+        });
     }
 
     async showGeminiModal(interaction) {
@@ -1552,6 +1629,14 @@ class BochiBot {
     }
 
     async showChannelSettings(interaction) {
+        if (!interaction.channel) {
+            await interaction.reply({
+                content: '❌ 无法获取频道信息。',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+        
         const channelId = interaction.channel.id;
         const channelName = interaction.channel.name;
         
