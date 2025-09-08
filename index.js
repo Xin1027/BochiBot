@@ -1912,6 +1912,7 @@ class BochiBot {
         }
     }
 
+    // 检查用户是否有管理员权限（可以使用所有命令）
     checkPermission(interaction) {
         const member = interaction.member;
         if (!member) return false;
@@ -1931,6 +1932,28 @@ class BochiBot {
         return this.config.botSettings.allowedRoles.some(roleId => 
             member.roles.cache.has(roleId)
         );
+    }
+    
+    // 检查普通用户是否可以在当前频道使用命令
+    checkChannelPermission(interaction) {
+        const member = interaction.member;
+        if (!member) return false;
+        
+        // 管理员可以在任何频道使用命令
+        if (this.checkPermission(interaction)) {
+            return true;
+        }
+        
+        // 检查当前频道是否在允许列表中
+        const channelId = interaction.channelId;
+        const allowedChannels = this.config.botSettings.allowedChannels || [];
+        
+        // 如果没有设置允许频道，则普通用户不能使用命令
+        if (allowedChannels.length === 0) {
+            return false;
+        }
+        
+        return allowedChannels.includes(channelId);
     }
 
     async showSystemManage(interaction) {
