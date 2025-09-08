@@ -2232,16 +2232,33 @@ class BochiBot {
                 Routes.applicationCommands(this.client.user.id),
                 { body: [] }
             );
-            console.log('🧹 已清除现有命令');
+            console.log('🧹 已清除现有全局命令');
             
             // 稍等片刻再注册新命令
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, 2000));
             
+            // 尝试注册全局命令
             await rest.put(
                 Routes.applicationCommands(this.client.user.id),
                 { body: commands }
             );
-            console.log('✅ 斜杠命令注册成功！');
+            console.log('✅ 全局斜杠命令注册成功！');
+            
+            // 同时也在所有服务器中注册（作为备用）
+            const guilds = this.client.guilds.cache;
+            console.log(`🔄 在 ${guilds.size} 个服务器中注册命令...`);
+            
+            for (const [guildId, guild] of guilds) {
+                try {
+                    await rest.put(
+                        Routes.applicationGuildCommands(this.client.user.id, guildId),
+                        { body: commands }
+                    );
+                    console.log(`✅ 在服务器 "${guild.name}" 中注册成功`);
+                } catch (guildError) {
+                    console.error(`⚠️  在服务器 "${guild.name}" 中注册失败:`, guildError.message);
+                }
+            }
         } catch (error) {
             console.error('斜杠命令注册失败:', error);
         }
