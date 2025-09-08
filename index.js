@@ -104,17 +104,37 @@ class BochiBot {
                     });
                 }
 
+                // 获取被阻止用户名单
+                const blockedUsersList = Array.from(this.config.botSettings.blockedUsers);
+                const blockedUsersText = blockedUsersList.length > 0 
+                    ? blockedUsersList.slice(0, 5).map(userId => `<@${userId}>`).join(', ') + 
+                      (blockedUsersList.length > 5 ? `等${blockedUsersList.length}人` : '')
+                    : '无';
+                
+                // 获取频道统计信息
+                const totalChannels = Object.keys(this.config.botSettings.channelSettings).length;
+                const totalReactions = Object.values(this.config.botSettings.channelStats)
+                    .reduce((sum, stat) => sum + stat.reactionCount, 0);
+                
+                // 检查API配置状态
+                const hasGeminiApi = this.config.apiSettings.geminiApiKeys.length > 0;
+                const hasOpenAiApi = this.config.apiSettings.openaiApiKey !== '';
+                const apiStatus = hasGeminiApi || hasOpenAiApi ? '✅ 已配置' : '❌ 未配置';
+
                 const embed = new EmbedBuilder()
                     .setColor('#FFB6C1')
                     .setTitle('🐕 波奇机器人控制面板')
-                    .setDescription('请选择要配置的功能：')
+                    .setDescription('📊 **系统状态概览**')
                     .addFields(
-                        { name: '🎨 图片反应', value: `当前状态: ${this.config.botSettings.autoReaction ? '开启' : '关闭'}`, inline: true },
-                        { name: '💬 AI点评', value: `当前状态: ${this.config.botSettings.aiComment ? '开启' : '关闭'}`, inline: true },
-                        { name: '🤖 AI服务', value: `当前使用: ${this.config.apiSettings.useGemini ? 'Gemini' : 'OpenAI'}`, inline: true }
+                        { name: '🎨 全局图片反应', value: this.config.botSettings.autoReaction ? '✅ 开启' : '❌ 关闭', inline: true },
+                        { name: '💬 全局AI点评', value: this.config.botSettings.aiComment ? '✅ 开启' : '❌ 关闭', inline: true },
+                        { name: '🤖 AI服务状态', value: apiStatus, inline: true },
+                        { name: '📺 管理频道数', value: totalChannels.toString(), inline: true },
+                        { name: '📊 总反应次数', value: totalReactions.toString(), inline: true },
+                        { name: '🚫 被阻止用户', value: blockedUsersText, inline: true }
                     );
 
-                const row = new ActionRowBuilder()
+                const row1 = new ActionRowBuilder()
                     .addComponents(
                         new ButtonBuilder()
                             .setCustomId('bot_settings')
@@ -123,19 +143,38 @@ class BochiBot {
                             .setEmoji('⚙️'),
                         new ButtonBuilder()
                             .setCustomId('api_settings')
-                            .setLabel('API配置')
+                            .setLabel('AI API配置')
                             .setStyle(ButtonStyle.Secondary)
                             .setEmoji('🔧'),
+                        new ButtonBuilder()
+                            .setCustomId('channel_management')
+                            .setLabel('频道管理')
+                            .setStyle(ButtonStyle.Success)
+                            .setEmoji('📺')
+                    );
+                
+                const row2 = new ActionRowBuilder()
+                    .addComponents(
                         new ButtonBuilder()
                             .setCustomId('permission_settings')
                             .setLabel('权限设置')
                             .setStyle(ButtonStyle.Danger)
-                            .setEmoji('🔒')
+                            .setEmoji('🔒'),
+                        new ButtonBuilder()
+                            .setCustomId('blocked_users_management')
+                            .setLabel('用户阻止管理')
+                            .setStyle(ButtonStyle.Secondary)
+                            .setEmoji('🚫'),
+                        new ButtonBuilder()
+                            .setCustomId('channel_stats')
+                            .setLabel('频道统计')
+                            .setStyle(ButtonStyle.Secondary)
+                            .setEmoji('📊')
                     );
 
                 await interaction.reply({
                     embeds: [embed],
-                    components: [row],
+                    components: [row1, row2],
                     flags: MessageFlags.Ephemeral
                 });
             }
@@ -376,6 +415,35 @@ class BochiBot {
                 break;
             case 'test_permissions':
                 await this.testPermissions(interaction);
+                break;
+            case 'channel_management':
+                await this.showChannelManagement(interaction);
+                break;
+            case 'blocked_users_management':
+                await this.showBlockedUsersManagement(interaction);
+                break;
+            case 'channel_stats':
+                await this.showChannelStats(interaction);
+                break;
+            case 'current_channel_settings':
+                await this.showChannelSettings(interaction);
+                break;
+            case 'clear_blocked_users':
+                this.config.botSettings.blockedUsers.clear();
+                await interaction.update({
+                    content: '✅ 已清空所有被阻止的用户列表。',
+                    embeds: [],
+                    components: []
+                });
+                break;
+            case 'reset_channel_settings':
+                this.config.botSettings.channelSettings = {};
+                this.config.botSettings.channelStats = {};
+                await interaction.update({
+                    content: '✅ 已重置所有频道设置和统计数据。',
+                    embeds: [],
+                    components: []
+                });
                 break;
         }
         
@@ -842,22 +910,29 @@ class BochiBot {
             }
         }
 
-        // AI点评功能
+        // AI点评功能 - 只有在配置了真实API时才进行点评
         if (channelSettings.aiComment) {
             try {
-                await message.channel.sendTyping();
+                let comment = null;
                 
-                let comment;
+                // 只有在配置了API时才进行点评
                 if (this.config.apiSettings.useGemini && this.config.apiSettings.geminiApiKeys.length > 0) {
+                    await message.channel.sendTyping();
                     comment = await this.getGeminiImageComment(attachment.url);
                 } else if (!this.config.apiSettings.useGemini && this.config.apiSettings.openaiApiKey) {
+                    await message.channel.sendTyping();
                     comment = await this.getOpenAIImageComment(attachment.url);
                 } else {
-                    comment = this.getLocalImageComment();
+                    // 没有配置API，不进行点评
+                    console.log('ℹ️  AI点评功能已开启，但未配置API，跳过点评');
+                    return;
                 }
 
                 if (comment) {
                     await message.reply(comment);
+                    console.log(`✅ AI点评成功: ${comment.substring(0, 30)}...`);
+                } else {
+                    console.log('⚠️  AI点评返回为空，可能是API调用失败');
                 }
             } catch (error) {
                 console.error('AI点评失败:', error);
@@ -939,20 +1014,7 @@ class BochiBot {
         }
     }
 
-    getLocalImageComment() {
-        const comments = [
-            "🎨 哇！这张图片真的很棒呢！波奇觉得色彩搭配很漂亮～",
-            "✨ 好美的画面啊！波奇看了心情都变好了～",
-            "🔥 这个构图真不错！波奇给你点个赞～",
-            "💖 真是一张令人印象深刻的图片！波奇很喜欢～",
-            "🌟 哇塞！这个视角很独特呢！波奇觉得很有创意～",
-            "🎯 画面细节处理得很好！波奇觉得很用心～",
-            "🌈 色彩真丰富！波奇看得眼花缭乱～",
-            "📸 拍得真好！波奇觉得很有艺术感～"
-        ];
-        
-        return comments[Math.floor(Math.random() * comments.length)];
-    }
+    // 移除默认点评功能 - 现在只依赖真实AI API
 
     async testApiConnection(interaction) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -1257,6 +1319,70 @@ class BochiBot {
         });
     }
 
+    async showChannelManagement(interaction) {
+        const embed = new EmbedBuilder()
+            .setColor('#FFB6C1')
+            .setTitle('📺 频道管理')
+            .setDescription('管理不同频道的波奇机器人设置');
+
+        const row1 = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('current_channel_settings')
+                    .setLabel('当前频道设置')
+                    .setStyle(ButtonStyle.Primary)
+                    .setEmoji('⚙️'),
+                new ButtonBuilder()
+                    .setCustomId('channel_stats')
+                    .setLabel('频道统计')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('📊'),
+                new ButtonBuilder()
+                    .setCustomId('reset_channel_settings')
+                    .setLabel('重置所有频道设置')
+                    .setStyle(ButtonStyle.Danger)
+                    .setEmoji('🔄')
+            );
+
+        await interaction.update({
+            embeds: [embed],
+            components: [row1]
+        });
+    }
+
+    async showBlockedUsersManagement(interaction) {
+        const blockedUsersList = Array.from(this.config.botSettings.blockedUsers);
+        
+        const embed = new EmbedBuilder()
+            .setColor('#FFB6C1')
+            .setTitle('🚫 用户阻止管理')
+            .setDescription(`当前有 ${blockedUsersList.length} 位用户被阻止反应`);
+
+        if (blockedUsersList.length > 0) {
+            const userMentions = blockedUsersList.slice(0, 20).map(userId => `<@${userId}>`);
+            embed.addFields({
+                name: '被阻止的用户',
+                value: userMentions.join(', ') + (blockedUsersList.length > 20 ? `\n...等${blockedUsersList.length}人` : ''),
+                inline: false
+            });
+        }
+
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('clear_blocked_users')
+                    .setLabel('清空阻止列表')
+                    .setStyle(ButtonStyle.Danger)
+                    .setEmoji('🗑️')
+                    .setDisabled(blockedUsersList.length === 0)
+            );
+
+        await interaction.update({
+            embeds: [embed],
+            components: [row]
+        });
+    }
+
     async showChannelStats(interaction) {
         const stats = this.config.botSettings.channelStats;
         
@@ -1294,10 +1420,18 @@ class BochiBot {
         const totalReactions = Object.values(stats).reduce((sum, stat) => sum + stat.reactionCount, 0);
         embed.setFooter({ text: `总反应次数: ${totalReactions}` });
 
-        await interaction.reply({
-            embeds: [embed],
-            flags: MessageFlags.Ephemeral
-        });
+        const isUpdateCall = interaction.isButton();
+        if (isUpdateCall) {
+            await interaction.update({
+                embeds: [embed],
+                components: []
+            });
+        } else {
+            await interaction.reply({
+                embeds: [embed],
+                flags: MessageFlags.Ephemeral
+            });
+        }
     }
 
     checkPermission(interaction) {
