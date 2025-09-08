@@ -172,9 +172,23 @@ class BochiBot {
                             .setEmoji('📊')
                     );
 
+                const row3 = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId('system_manage')
+                            .setLabel('系统管理')
+                            .setStyle(ButtonStyle.Danger)
+                            .setEmoji('🗑️'),
+                        new ButtonBuilder()
+                            .setCustomId('help_docs')
+                            .setLabel('帮助文档')
+                            .setStyle(ButtonStyle.Secondary)
+                            .setEmoji('❓')
+                    );
+
                 await interaction.reply({
                     embeds: [embed],
-                    components: [row1, row2],
+                    components: [row1, row2, row3],
                     flags: MessageFlags.Ephemeral
                 });
             }
@@ -444,6 +458,12 @@ class BochiBot {
             case 'channel_stats':
                 await this.showChannelStats(interaction);
                 break;
+            case 'system_manage':
+                await this.showSystemManage(interaction);
+                break;
+            case 'help_docs':
+                await this.showHelp(interaction);
+                break;
             case 'current_channel_settings':
                 await this.showChannelSettings(interaction);
                 break;
@@ -463,6 +483,24 @@ class BochiBot {
                     embeds: [],
                     components: []
                 });
+                break;
+            case 'clear_channel_stats':
+                await this.clearChannelStats(interaction);
+                break;
+            case 'clear_blocked_users_data':
+                await this.clearBlockedUsersData(interaction);
+                break;
+            case 'clear_emoji_cache':
+                await this.clearEmojiCacheData(interaction);
+                break;
+            case 'clear_all_data':
+                await this.clearAllData(interaction);
+                break;
+            case 'force_gc':
+                await this.forceGarbageCollection(interaction);
+                break;
+            case 'back_to_main_panel':
+                await this.showBochiPanel(interaction);
                 break;
         }
         
@@ -1530,6 +1568,254 @@ class BochiBot {
         return this.config.botSettings.allowedRoles.some(roleId => 
             member.roles.cache.has(roleId)
         );
+    }
+
+    async showSystemManage(interaction) {
+        // 检查权限
+        const hasPermission = await this.checkPermission(interaction);
+        if (!hasPermission) {
+            await interaction.reply({
+                content: '❌ 你没有权限使用此功能',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        // 获取内存使用信息
+        const memoryUsage = process.memoryUsage();
+        const formatBytes = (bytes) => {
+            return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+        };
+
+        // 统计数据量
+        const channelCount = Object.keys(this.config.botSettings.channelSettings).length;
+        const blockedUserCount = this.config.botSettings.blockedUsers.size;
+        const totalReactions = Object.values(this.config.botSettings.channelStats)
+            .reduce((sum, stats) => sum + (stats.reactionCount || 0), 0);
+        const serverEmojisCount = this.config.botSettings.serverEmojisCache.length;
+
+        const embed = new EmbedBuilder()
+            .setTitle('🗑️ 系统管理 - 数据清理')
+            .setColor(0xFF6B6B)
+            .addFields(
+                {
+                    name: '💾 内存使用情况',
+                    value: `**RSS内存**: ${formatBytes(memoryUsage.rss)}\n**堆内存**: ${formatBytes(memoryUsage.heapUsed)}/${formatBytes(memoryUsage.heapTotal)}\n**外部内存**: ${formatBytes(memoryUsage.external)}`,
+                    inline: true
+                },
+                {
+                    name: '📊 存储数据统计',
+                    value: `**管理频道数**: ${channelCount}\n**被阻止用户**: ${blockedUserCount}\n**总反应次数**: ${totalReactions}\n**缓存表情数**: ${serverEmojisCount}`,
+                    inline: true
+                },
+                {
+                    name: '⚠️ 清理操作说明',
+                    value: '清理数据将释放内存空间，但会丢失所有历史记录和统计数据。请谨慎操作！',
+                    inline: false
+                }
+            )
+            .setFooter({ text: '选择需要清理的数据类型' })
+            .setTimestamp();
+
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('clear_channel_stats')
+                    .setLabel('清空频道统计')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('📊'),
+                new ButtonBuilder()
+                    .setCustomId('clear_blocked_users_data')
+                    .setLabel('清空阻止用户')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('👥'),
+                new ButtonBuilder()
+                    .setCustomId('clear_emoji_cache')
+                    .setLabel('清空表情缓存')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('😀')
+            );
+
+        const row2 = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('clear_all_data')
+                    .setLabel('清空所有数据')
+                    .setStyle(ButtonStyle.Danger)
+                    .setEmoji('💥'),
+                new ButtonBuilder()
+                    .setCustomId('force_gc')
+                    .setLabel('强制垃圾回收')
+                    .setStyle(ButtonStyle.Primary)
+                    .setEmoji('🔄'),
+                new ButtonBuilder()
+                    .setCustomId('back_to_main_panel')
+                    .setLabel('返回主面板')
+                    .setStyle(ButtonStyle.Success)
+                    .setEmoji('↩️')
+            );
+
+        await interaction.reply({
+            embeds: [embed],
+            components: [row, row2],
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    async showHelp(interaction) {
+        const embed = new EmbedBuilder()
+            .setTitle('❓ 波奇机器人帮助文档')
+            .setColor(0x00FF00)
+            .setDescription('波奇是一个专为图片识别和AI点评设计的Discord机器人')
+            .addFields(
+                {
+                    name: '🎨 主要功能',
+                    value: '• 自动检测频道中的图片\n• 智能添加表情反应\n• AI点评系统（支持Gemini和OpenAI）\n• 频道独立设置\n• 用户个人控制',
+                    inline: false
+                },
+                {
+                    name: '🔧 基本使用',
+                    value: '• `/bochi` - 打开控制面板\n• `/限制bochi对我做出反应` - 屏蔽反应\n• `/允许bochi对我做出反应` - 开启反应\n• `/频道设置` - 当前频道设置\n• `/频道统计` - 查看统计信息',
+                    inline: false
+                }
+            )
+            .setFooter({ text: '更多功能请通过控制面板探索' })
+            .setTimestamp();
+
+        await interaction.reply({
+            embeds: [embed],
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    async clearChannelStats(interaction) {
+        const hasPermission = await this.checkPermission(interaction);
+        if (!hasPermission) {
+            await interaction.reply({
+                content: '❌ 你没有权限使用此功能',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        const beforeCount = Object.keys(this.config.botSettings.channelStats).length;
+        this.config.botSettings.channelStats = {};
+        
+        await interaction.reply({
+            content: `✅ 已清空 ${beforeCount} 个频道的统计数据，内存已释放！`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    async clearBlockedUsersData(interaction) {
+        const hasPermission = await this.checkPermission(interaction);
+        if (!hasPermission) {
+            await interaction.reply({
+                content: '❌ 你没有权限使用此功能',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        const beforeCount = this.config.botSettings.blockedUsers.size;
+        this.config.botSettings.blockedUsers.clear();
+        
+        await interaction.reply({
+            content: `✅ 已清空 ${beforeCount} 个被阻止用户的记录，所有用户现在都可以接收机器人反应！`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    async clearEmojiCacheData(interaction) {
+        const hasPermission = await this.checkPermission(interaction);
+        if (!hasPermission) {
+            await interaction.reply({
+                content: '❌ 你没有权限使用此功能',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        const beforeCount = this.config.botSettings.serverEmojisCache.length;
+        this.config.botSettings.serverEmojisCache = [];
+        this.config.botSettings.customEmojis = [];
+        this.config.botSettings.selectedServerEmojis = [];
+        
+        await interaction.reply({
+            content: `✅ 已清空 ${beforeCount} 个缓存表情，表情缓存已重置！下次使用时会重新扫描。`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    async clearAllData(interaction) {
+        const hasPermission = await this.checkPermission(interaction);
+        if (!hasPermission) {
+            await interaction.reply({
+                content: '❌ 你没有权限使用此功能',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        const beforeStats = {
+            channels: Object.keys(this.config.botSettings.channelStats).length,
+            blockedUsers: this.config.botSettings.blockedUsers.size,
+            emojis: this.config.botSettings.serverEmojisCache.length,
+            totalReactions: Object.values(this.config.botSettings.channelStats)
+                .reduce((sum, stats) => sum + (stats.reactionCount || 0), 0)
+        };
+
+        this.config.botSettings.channelStats = {};
+        this.config.botSettings.blockedUsers.clear();
+        this.config.botSettings.serverEmojisCache = [];
+        this.config.botSettings.customEmojis = [];
+        this.config.botSettings.selectedServerEmojis = [];
+        
+        await interaction.reply({
+            content: `🔥 **全面数据清理完成！**\n` +
+                     `• 清空了 ${beforeStats.channels} 个频道统计\n` +
+                     `• 清空了 ${beforeStats.blockedUsers} 个阻止用户\n` +
+                     `• 清空了 ${beforeStats.emojis} 个缓存表情\n` +
+                     `• 总计释放了 ${beforeStats.totalReactions} 条反应记录\n\n` +
+                     `✅ 内存大幅释放，机器人已轻装上阵！`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    async forceGarbageCollection(interaction) {
+        const hasPermission = await this.checkPermission(interaction);
+        if (!hasPermission) {
+            await interaction.reply({
+                content: '❌ 你没有权限使用此功能',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        const beforeMemory = process.memoryUsage();
+        
+        if (global.gc) {
+            global.gc();
+        }
+        
+        const afterMemory = process.memoryUsage();
+        const freedMB = ((beforeMemory.heapUsed - afterMemory.heapUsed) / 1024 / 1024).toFixed(2);
+        
+        await interaction.reply({
+            content: `🔄 **强制垃圾回收完成！**\n` +
+                     `• 回收前: ${(beforeMemory.heapUsed / 1024 / 1024).toFixed(2)} MB\n` +
+                     `• 回收后: ${(afterMemory.heapUsed / 1024 / 1024).toFixed(2)} MB\n` +
+                     `• 释放内存: ${freedMB >= 0 ? '+' : ''}${freedMB} MB\n\n` +
+                     `${freedMB > 0 ? '✅ 内存回收成功！' : 'ℹ️ 当前内存使用已优化，无需额外回收。'}`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    async showBochiPanel(interaction) {
+        const panelCommand = this.commands.get('bochi');
+        if (panelCommand) {
+            await panelCommand.execute(interaction);
+        }
     }
 
     async registerSlashCommands() {
