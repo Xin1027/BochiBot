@@ -611,14 +611,24 @@ class BochiBot {
     }
 
     async showBotSettings(interaction) {
+        const guild = interaction.guild;
+        const guildId = guild?.id;
+        
+        // 获取当前服务器的表情配置
+        const serverConfig = guildId ? this.getServerConfig(guildId) : null;
+        const selectedServerEmojis = serverConfig ? serverConfig.selectedServerEmojis : [];
+        const cachedEmojisCount = serverConfig ? serverConfig.serverEmojisCache.length : 0;
+        
         const embed = new EmbedBuilder()
             .setColor('#FFB6C1')
             .setTitle('🐕 机器人设置')
+            .setDescription(guild ? `当前服务器: ${guild.name}` : '未知服务器')
             .addFields(
                 { name: '🎨 自动图片反应', value: this.config.botSettings.autoReaction ? '✅ 开启' : '❌ 关闭', inline: true },
                 { name: '💬 AI图片点评', value: this.config.botSettings.aiComment ? '✅ 开启' : '❌ 关闭', inline: true },
                 { name: '😊 标准表情', value: this.config.botSettings.reactionEmojis.join(' '), inline: false },
-                { name: '🎭 已选服务器表情', value: this.config.botSettings.selectedServerEmojis.length > 0 ? this.config.botSettings.selectedServerEmojis.slice(0, 8).join(' ') + (this.config.botSettings.selectedServerEmojis.length > 8 ? '...' : '') : '无', inline: false }
+                { name: '🎭 本服务器已选表情', value: selectedServerEmojis.length > 0 ? selectedServerEmojis.slice(0, 8).join(' ') + (selectedServerEmojis.length > 8 ? `等${selectedServerEmojis.length}个...` : '') : '无', inline: false },
+                { name: '📊 本服务器表情缓存', value: `${cachedEmojisCount} 个`, inline: true }
             );
 
         const row1 = new ActionRowBuilder()
@@ -655,7 +665,7 @@ class BochiBot {
                     .setCustomId('select_server_emojis')
                     .setLabel('选择服务器表情')
                     .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(this.config.botSettings.serverEmojisCache.length === 0),
+                    .setDisabled(cachedEmojisCount === 0),
                 new ButtonBuilder()
                     .setCustomId('test_permissions')
                     .setLabel(!this.fullPermissions ? '尝试启用完整权限' : '权限测试')
@@ -1877,13 +1887,25 @@ class BochiBot {
             return;
         }
 
-        const beforeCount = this.config.botSettings.serverEmojisCache.length;
-        this.config.botSettings.serverEmojisCache = [];
-        this.config.botSettings.customEmojis = [];
-        this.config.botSettings.selectedServerEmojis = [];
+        const guild = interaction.guild;
+        if (!guild) {
+            await interaction.reply({
+                content: '❌ 无法获取服务器信息。',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        const serverConfig = this.getServerConfig(guild.id);
+        const beforeCount = serverConfig.serverEmojisCache.length;
+        serverConfig.serverEmojisCache = [];
+        serverConfig.customEmojis = [];
+        serverConfig.selectedServerEmojis = [];
+        serverConfig.tempSelectedEmojis = [];
+        serverConfig.emojiPageIndex = 0;
         
         await interaction.reply({
-            content: `✅ 已清空 ${beforeCount} 个缓存表情，表情缓存已重置！下次使用时会重新扫描。`,
+            content: `✅ 已清空本服务器的 ${beforeCount} 个缓存表情，表情缓存已重置！下次使用时会重新扫描。`,
             flags: MessageFlags.Ephemeral
         });
     }
