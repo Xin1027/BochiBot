@@ -358,8 +358,34 @@ class BochiBot {
         this.commands.set(unblockCommand.name, unblockCommand);
         this.commands.set(channelCommand.name, channelCommand);
         this.commands.set(statsCommand.name, statsCommand);
+        // 测试权限命令（所有用户可用）
+        const testPermissionCommand = {
+            name: '测试我的权限',
+            description: '测试当前用户是否有机器人管理权限',
+            execute: async (interaction) => {
+                const hasPermission = this.checkPermission(interaction);
+                const member = interaction.member;
+                
+                const embed = new EmbedBuilder()
+                    .setColor(hasPermission ? '#00FF00' : '#FF0000')
+                    .setTitle('🔐 权限测试结果')
+                    .addFields(
+                        { name: '👤 用户', value: `${member.user.username} (${member.id})`, inline: false },
+                        { name: '🔐 管理权限', value: hasPermission ? '✅ 有权限' : '❌ 无权限', inline: true },
+                        { name: '👑 服务器所有者', value: member.guild.ownerId === member.id ? '✅ 是' : '❌ 否', inline: true },
+                        { name: '🎭 用户角色', value: member.roles.cache.map(r => r.name).join(', ') || '无角色', inline: false }
+                    );
+
+                await interaction.reply({
+                    embeds: [embed],
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+        };
+
         this.commands.set(syncAdminCommand.name, syncAdminCommand);
         this.commands.set(debugRolesCommand.name, debugRolesCommand);
+        this.commands.set(testPermissionCommand.name, testPermissionCommand);
     }
 
     setupEventHandlers() {
@@ -960,10 +986,19 @@ class BochiBot {
             }
         }
 
-        await interaction.update({
-            embeds: [embed],
-            components: components
-        });
+        try {
+            // 检查交互是否仍然有效
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.update({
+                    embeds: [embed],
+                    components: components
+                });
+            } else {
+                console.log('权限设置交互已过期或已处理，跳过更新');
+            }
+        } catch (error) {
+            console.error('更新权限设置时出错:', error.message);
+        }
     }
 
     async showChannelAllowedSettings(interaction) {
