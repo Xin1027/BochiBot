@@ -25,6 +25,7 @@ class BochiBot {
                 autoReaction: true,
                 aiComment: true,
                 reactionEmojis: ['👍', '❤️', '🎨', '✨', '🔥'],
+                allowedRoles: [], // 全局权限角色（向后兼容）
                 aiPrompt: '请用中文对这张图片进行简短的正面点评，语气要友好温馨。点评要真诚且具体，不要过于夸张。请控制在50字以内。', 
                 channelSettings: {}, // 按频道存储不同的设置 {channelId: {autoReaction: bool, aiComment: bool, ...}}
                 blockedUsers: new Set(), // 不希望被机器人反应的用户ID集合
