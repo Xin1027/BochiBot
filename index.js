@@ -340,6 +340,12 @@ class BochiBot {
             } else {
                 console.log(`⚠️  图片检测功能需要启用 MESSAGE CONTENT INTENT 权限`);
             }
+            
+            // 初始化所有服务器的权限设置
+            this.client.guilds.cache.forEach(guild => {
+                this.initializePermissions(guild);
+            });
+            
             this.registerSlashCommands();
         });
 
@@ -407,6 +413,11 @@ class BochiBot {
                     await this.safeReplyError(interaction, '表单提交时发生错误！');
                 }
             }
+        });
+
+        // 监听角色变化事件，实现动态权限管理
+        this.client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
+            await this.handleRoleChange(oldMember, newMember);
         });
 
         // 处理消息（图片检测） - 仅在完整权限模式下启用
@@ -2174,6 +2185,99 @@ class BochiBot {
         } catch (error) {
             console.error('显示角色调试信息时出错:', error);
             await this.safeReplyError(interaction, '获取角色调试信息时发生错误！');
+        }
+    }
+
+    // 处理角色变化事件，实现动态权限管理
+    async handleRoleChange(oldMember, newMember) {
+        try {
+            // 检查BOT维护员角色的变化
+            const maintainerRoleName = 'BOT维护员';
+            const maintainerRole = newMember.guild.roles.cache.find(role => role.name === maintainerRoleName);
+            
+            if (!maintainerRole) return; // 如果没有BOT维护员角色，不处理
+            
+            const hadRole = oldMember.roles.cache.has(maintainerRole.id);
+            const hasRole = newMember.roles.cache.has(maintainerRole.id);
+            
+            // 角色状态没有变化，不处理
+            if (hadRole === hasRole) return;
+            
+            // 角色状态发生变化
+            if (hasRole && !hadRole) {
+                // 用户获得了BOT维护员角色
+                console.log(`🔑 用户 ${newMember.user.username} 获得了 BOT维护员 角色`);
+                await this.updateUserCommandPermissions(newMember, true);
+            } else if (hadRole && !hasRole) {
+                // 用户失去了BOT维护员角色
+                console.log(`🔒 用户 ${newMember.user.username} 失去了 BOT维护员 角色`);
+                await this.updateUserCommandPermissions(newMember, false);
+            }
+        } catch (error) {
+            console.error('处理角色变化时出错:', error.message);
+        }
+    }
+
+    // 更新用户的命令权限
+    async updateUserCommandPermissions(member, hasAdminAccess) {
+        try {
+            const guild = member.guild;
+            const adminCommands = ['bochi', '频道设置', '频道统计']; // 管理员命令列表
+            
+            // 为了简化实现，我们使用内部权限系统而不是Discord API权限
+            // 这样可以避免复杂的权限API调用，同时保持功能完整性
+            
+            if (hasAdminAccess) {
+                // 添加到内部管理员列表（如果需要）
+                if (!this.config.botSettings.allowedRoles.includes(member.id)) {
+                    this.config.botSettings.allowedRoles.push(member.id);
+                }
+                console.log(`✅ 已授予 ${member.user.username} 管理员命令访问权限`);
+            } else {
+                // 从内部管理员列表移除
+                const index = this.config.botSettings.allowedRoles.indexOf(member.id);
+                if (index > -1) {
+                    this.config.botSettings.allowedRoles.splice(index, 1);
+                }
+                console.log(`❌ 已撤销 ${member.user.username} 的管理员命令访问权限`);
+            }
+            
+            // 发送通知消息给用户（可选）
+            try {
+                const embed = new EmbedBuilder()
+                    .setColor(hasAdminAccess ? '#00FF00' : '#FF0000')
+                    .setTitle('🔑 权限变更通知')
+                    .setDescription(hasAdminAccess ? 
+                        '您已获得波奇机器人的管理员权限！现在可以使用 `/bochi` 等管理命令。' :
+                        '您的波奇机器人管理员权限已被撤销。')
+                    .setTimestamp();
+                
+                await member.send({ embeds: [embed] });
+            } catch (dmError) {
+                // 如果无法发送私信，静默处理
+            }
+            
+        } catch (error) {
+            console.error('更新用户命令权限时出错:', error.message);
+        }
+    }
+
+    // 初始化服务器的权限同步
+    async initializePermissions(guild) {
+        try {
+            const maintainerRole = guild.roles.cache.find(role => role.name === 'BOT维护员');
+            if (!maintainerRole) return;
+            
+            // 同步所有拥有BOT维护员角色的用户
+            maintainerRole.members.forEach(member => {
+                if (!this.config.botSettings.allowedRoles.includes(member.id)) {
+                    this.config.botSettings.allowedRoles.push(member.id);
+                }
+            });
+            
+            console.log(`🔄 已同步 ${guild.name} 的权限设置，BOT维护员数量: ${maintainerRole.members.size}`);
+        } catch (error) {
+            console.error('初始化权限时出错:', error.message);
         }
     }
 
