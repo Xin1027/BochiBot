@@ -353,11 +353,23 @@ class BochiBot {
                     } catch (error) {
                         console.error('命令执行错误:', error);
                         try {
-                            const reply = { content: '执行命令时发生错误！', flags: MessageFlags.Ephemeral };
-                            if (interaction.replied || interaction.deferred) {
-                                await interaction.followUp(reply);
-                            } else {
+                            // 检查交互是否还有效且未过期
+                            const now = Date.now();
+                            const interactionTime = interaction.createdTimestamp;
+                            const timeDiff = now - interactionTime;
+                            
+                            // 如果交互超过14分钟（Discord交互15分钟过期），跳过回复
+                            if (timeDiff > 14 * 60 * 1000) {
+                                console.log('交互已过期，跳过错误回复');
+                                return;
+                            }
+                            
+                            // 更加谨慎地检查交互状态
+                            if (!interaction.replied && !interaction.deferred) {
+                                const reply = { content: '执行命令时发生错误！', flags: MessageFlags.Ephemeral };
                                 await interaction.reply(reply);
+                            } else {
+                                console.log('交互已被处理，跳过错误回复');
                             }
                         } catch (followupError) {
                             console.error('无法发送错误消息:', followupError.message);
@@ -372,6 +384,7 @@ class BochiBot {
                     await this.handleButtonInteraction(interaction);
                 } catch (error) {
                     console.error('按钮交互错误:', error);
+                    await this.safeReplyError(interaction, '按钮操作时发生错误！');
                 }
             }
 
@@ -381,6 +394,7 @@ class BochiBot {
                     await this.handleSelectMenuInteraction(interaction);
                 } catch (error) {
                     console.error('选择菜单交互错误:', error);
+                    await this.safeReplyError(interaction, '菜单操作时发生错误！');
                 }
             }
 
@@ -390,6 +404,7 @@ class BochiBot {
                     await this.handleModalInteraction(interaction);
                 } catch (error) {
                     console.error('模态框交互错误:', error);
+                    await this.safeReplyError(interaction, '表单提交时发生错误！');
                 }
             }
         });
@@ -1964,6 +1979,34 @@ class BochiBot {
         }
         
         return allowedChannels.includes(channelId);
+    }
+
+    // 安全地回复错误消息，避免"Unknown interaction"错误
+    async safeReplyError(interaction, message) {
+        try {
+            // 检查交互是否还有效且未过期
+            const now = Date.now();
+            const interactionTime = interaction.createdTimestamp;
+            const timeDiff = now - interactionTime;
+            
+            // 如果交互超过14分钟（Discord交互15分钟过期），跳过回复
+            if (timeDiff > 14 * 60 * 1000) {
+                console.log('交互已过期，跳过错误回复');
+                return;
+            }
+            
+            // 更加谨慎地检查交互状态
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.reply({
+                    content: message,
+                    flags: MessageFlags.Ephemeral
+                });
+            } else {
+                console.log('交互已被处理，跳过错误回复');
+            }
+        } catch (error) {
+            console.error('安全错误回复失败:', error.message);
+        }
     }
 
     async showSystemManage(interaction) {
