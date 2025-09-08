@@ -2071,23 +2071,28 @@ class BochiBot {
         const commands = [
             {
                 name: 'bochi',
-                description: '打开波奇机器人配置面板'
+                description: '打开波奇机器人配置面板',
+                default_member_permissions: '0' // 默认禁用，需要管理员权限
             },
             {
                 name: '限制bochi对我做出反应',
                 description: '阻止波奇机器人对您的图片做出反应'
+                // 所有用户可见
             },
             {
                 name: '允许bochi对我做出反应',
                 description: '允许波奇机器人对您的图片做出反应'
+                // 所有用户可见
             },
             {
                 name: '频道设置',
-                description: '设置当前频道的波奇机器人配置'
+                description: '设置当前频道的波奇机器人配置',
+                default_member_permissions: '0' // 默认禁用，需要管理员权限
             },
             {
                 name: '频道统计',
-                description: '查看所有频道的反应统计信息'
+                description: '查看所有频道的反应统计信息',
+                default_member_permissions: '0' // 默认禁用，需要管理员权限
             }
         ];
 
