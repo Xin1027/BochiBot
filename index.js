@@ -25,14 +25,13 @@ class BochiBot {
                 autoReaction: true,
                 aiComment: true,
                 reactionEmojis: ['👍', '❤️', '🎨', '✨', '🔥'],
-                customEmojis: [], // 存储服务器自定义表情
-                serverEmojisCache: [], // 缓存所有服务器表情
-                selectedServerEmojis: [], // 用户选择的服务器表情
-                allowedRoles: [], // 存储允许配置的角色ID
                 aiPrompt: '请用中文对这张图片进行简短的正面点评，语气要友好温馨。点评要真诚且具体，不要过于夸张。请控制在50字以内。', 
                 channelSettings: {}, // 按频道存储不同的设置 {channelId: {autoReaction: bool, aiComment: bool, ...}}
                 blockedUsers: new Set(), // 不希望被机器人反应的用户ID集合
-                channelStats: {} // 频道统计信息 {channelId: {name: string, reactionCount: number, lastUpdate: Date}}
+                channelStats: {}, // 频道统计信息 {channelId: {name: string, reactionCount: number, lastUpdate: Date}}
+                
+                // 服务器特定配置 {guildId: {settings, emojis, etc}}
+                serverConfigs: {} // 每个服务器独立的配置
             },
             apiSettings: {
                 geminiApiKeys: [],
@@ -89,6 +88,27 @@ class BochiBot {
         } catch (error) {
             console.error('使用基础权限登录失败:', error);
         }
+    }
+
+    // 获取或创建服务器配置
+    getServerConfig(guildId) {
+        if (!this.config.botSettings.serverConfigs[guildId]) {
+            this.config.botSettings.serverConfigs[guildId] = {
+                customEmojis: [], // 存储服务器自定义表情
+                serverEmojisCache: [], // 缓存所有服务器表情
+                selectedServerEmojis: [], // 用户选择的服务器表情
+                allowedRoles: [], // 存储允许配置的角色ID
+                emojiPageIndex: 0, // 表情选择页面索引
+                tempSelectedEmojis: [] // 临时选择的表情
+            };
+        }
+        return this.config.botSettings.serverConfigs[guildId];
+    }
+
+    // 获取服务器在消息中使用的表情
+    getServerEmojisForReaction(guildId) {
+        const serverConfig = this.getServerConfig(guildId);
+        return [...this.config.botSettings.reactionEmojis, ...serverConfig.selectedServerEmojis];
     }
 
     setupCommands() {
@@ -418,11 +438,20 @@ class BochiBot {
                 await this.fetchAvailableModels(interaction);
                 break;
             case 'confirm_emoji_selection':
-                if (this.tempSelectedEmojis) {
-                    this.config.botSettings.selectedServerEmojis = [...this.tempSelectedEmojis];
-                    this.tempSelectedEmojis = null;
+                const guild = interaction.guild;
+                if (!guild) {
                     await interaction.reply({
-                        content: `✅ 已确认选择 ${this.config.botSettings.selectedServerEmojis.length} 个服务器表情用于反应！`,
+                        content: '❌ 无法获取服务器信息。',
+                        flags: MessageFlags.Ephemeral
+                    });
+                    break;
+                }
+                const serverConfig = this.getServerConfig(guild.id);
+                if (serverConfig.tempSelectedEmojis && serverConfig.tempSelectedEmojis.length > 0) {
+                    serverConfig.selectedServerEmojis = [...serverConfig.tempSelectedEmojis];
+                    serverConfig.tempSelectedEmojis = [];
+                    await interaction.reply({
+                        content: `✅ 已确认选择 ${serverConfig.selectedServerEmojis.length} 个服务器表情用于反应！`,
                         flags: MessageFlags.Ephemeral
                     });
                 } else {
@@ -433,8 +462,17 @@ class BochiBot {
                 }
                 break;
             case 'clear_emoji_selection':
-                this.config.botSettings.selectedServerEmojis = [];
-                this.tempSelectedEmojis = null;
+                const clearGuild = interaction.guild;
+                if (!clearGuild) {
+                    await interaction.reply({
+                        content: '❌ 无法获取服务器信息。',
+                        flags: MessageFlags.Ephemeral
+                    });
+                    break;
+                }
+                const clearServerConfig = this.getServerConfig(clearGuild.id);
+                clearServerConfig.selectedServerEmojis = [];
+                clearServerConfig.tempSelectedEmojis = [];
                 await interaction.reply({
                     content: '✅ 已清除所有选择的服务器表情。',
                     flags: MessageFlags.Ephemeral
@@ -501,6 +539,48 @@ class BochiBot {
                 break;
             case 'back_to_main_panel':
                 await this.showBochiPanel(interaction);
+                break;
+            case 'emoji_prev_page':
+                const prevGuild = interaction.guild;
+                if (prevGuild) {
+                    const prevServerConfig = this.getServerConfig(prevGuild.id);
+                    if (prevServerConfig.emojiPageIndex > 0) {
+                        prevServerConfig.emojiPageIndex--;
+                    }
+                    await this.showServerEmojiSelection(interaction);
+                }
+                break;
+            case 'emoji_next_page':
+                const nextGuild = interaction.guild;
+                if (nextGuild) {
+                    const nextServerConfig = this.getServerConfig(nextGuild.id);
+                    const emojisPerPage = 25;
+                    const totalPages = Math.ceil(nextServerConfig.serverEmojisCache.length / emojisPerPage);
+                    if (nextServerConfig.emojiPageIndex < totalPages - 1) {
+                        nextServerConfig.emojiPageIndex++;
+                    }
+                    await this.showServerEmojiSelection(interaction);
+                }
+                break;
+            case 'emoji_show_selected':
+                const showGuild = interaction.guild;
+                if (showGuild) {
+                    const showServerConfig = this.getServerConfig(showGuild.id);
+                    const selectedEmojis = showServerConfig.selectedServerEmojis;
+                    if (selectedEmojis.length === 0) {
+                        await interaction.reply({
+                            content: '❌ 尚未选择任何表情。',
+                            flags: MessageFlags.Ephemeral
+                        });
+                    } else {
+                        const emojiPreview = selectedEmojis.slice(0, 20).join(' ') + 
+                                           (selectedEmojis.length > 20 ? ` 等${selectedEmojis.length}个...` : '');
+                        await interaction.reply({
+                            content: `✅ 已选择的服务器表情 (${selectedEmojis.length}个):\n\n${emojiPreview}`,
+                            flags: MessageFlags.Ephemeral
+                        });
+                    }
+                }
                 break;
         }
         
@@ -824,8 +904,17 @@ class BochiBot {
                 await this.showApiSettings(interaction);
                 break;
             case 'emoji_selection_menu':
-                // 临时存储选择的表情
-                this.tempSelectedEmojis = interaction.values;
+                const emojiGuild = interaction.guild;
+                if (!emojiGuild) {
+                    await interaction.reply({
+                        content: '❌ 无法获取服务器信息。',
+                        flags: MessageFlags.Ephemeral
+                    });
+                    break;
+                }
+                const emojiServerConfig = this.getServerConfig(emojiGuild.id);
+                // 临时存储选择的表情到服务器配置中
+                emojiServerConfig.tempSelectedEmojis = interaction.values;
                 await interaction.reply({
                     content: `✅ 已选择 ${interaction.values.length} 个表情，请点击"确认选择"来应用更改。`,
                     flags: MessageFlags.Ephemeral
@@ -936,8 +1025,12 @@ class BochiBot {
         
         // 自动反应功能
         if (channelSettings.autoReaction) {
+            // 获取服务器特定的表情配置
+            const guildId = message.guild?.id;
+            const serverEmojis = guildId ? this.getServerEmojisForReaction(guildId) : this.config.botSettings.reactionEmojis;
+            
             // 合并标准表情和选择的服务器表情
-            const allEmojis = [...this.config.botSettings.reactionEmojis, ...this.config.botSettings.selectedServerEmojis];
+            const allEmojis = serverEmojis;
             
             if (allEmojis.length > 0) {
                 const randomEmoji = allEmojis[Math.floor(Math.random() * allEmojis.length)];
@@ -1259,8 +1352,10 @@ class BochiBot {
                 }
             });
             
-            // 更新缓存，不直接添加到反应列表
-            this.config.botSettings.serverEmojisCache = emojiList;
+            // 获取服务器配置并更新该服务器的表情缓存
+            const serverConfig = this.getServerConfig(guild.id);
+            serverConfig.serverEmojisCache = emojiList;
+            serverConfig.emojiPageIndex = 0; // 重置分页索引
 
             await interaction.reply({
                 content: `✅ 已扫描到 ${emojiList.length} 个服务器表情！\n\n` +
@@ -1340,7 +1435,17 @@ class BochiBot {
     }
 
     async showServerEmojiSelection(interaction) {
-        const cachedEmojis = this.config.botSettings.serverEmojisCache;
+        const guild = interaction.guild;
+        if (!guild) {
+            await interaction.reply({
+                content: '❌ 无法获取服务器信息。',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        const serverConfig = this.getServerConfig(guild.id);
+        const cachedEmojis = serverConfig.serverEmojisCache;
         
         if (cachedEmojis.length === 0) {
             await interaction.reply({
@@ -1350,18 +1455,34 @@ class BochiBot {
             return;
         }
 
-        // 创建表情选择菜单，最多25个选项
-        const maxOptions = Math.min(cachedEmojis.length, 25);
-        const emojiOptions = cachedEmojis.slice(0, maxOptions).map((emoji, index) => {
+        // 分页设置
+        const emojisPerPage = 25;
+        const pageIndex = serverConfig.emojiPageIndex || 0;
+        const totalPages = Math.ceil(cachedEmojis.length / emojisPerPage);
+        const startIndex = pageIndex * emojisPerPage;
+        const endIndex = Math.min(startIndex + emojisPerPage, cachedEmojis.length);
+        
+        // 获取当前页的表情
+        const currentPageEmojis = cachedEmojis.slice(startIndex, endIndex);
+        
+        if (currentPageEmojis.length === 0) {
+            await interaction.reply({
+                content: '❌ 当前页面没有表情。',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        const emojiOptions = currentPageEmojis.map((emoji, index) => {
             // 提取表情名称
             const match = emoji.match(/:([^:]+):/);
-            const emojiName = match ? match[1] : `emoji_${index}`;
+            const emojiName = match ? match[1] : `emoji_${startIndex + index}`;
             
             return {
                 label: emojiName,
                 value: emoji,
                 emoji: emoji,
-                default: this.config.botSettings.selectedServerEmojis.includes(emoji)
+                default: serverConfig.selectedServerEmojis.includes(emoji)
             };
         });
 
@@ -1369,16 +1490,36 @@ class BochiBot {
             .setColor('#FFB6C1')
             .setTitle('🎭 选择服务器表情')
             .setDescription(`从 ${cachedEmojis.length} 个服务器表情中选择要用于反应的表情\n\n` +
-                          `当前已选择: ${this.config.botSettings.selectedServerEmojis.length} 个表情`);
+                          `当前页面: ${pageIndex + 1}/${totalPages} (显示 ${startIndex + 1}-${endIndex})\n` +
+                          `当前已选择: ${serverConfig.selectedServerEmojis.length} 个表情`);
 
         const selectMenu = new StringSelectMenuBuilder()
             .setCustomId('emoji_selection_menu')
             .setPlaceholder('选择要用于反应的表情...')
             .setMinValues(0)
-            .setMaxValues(Math.min(maxOptions, 10))
+            .setMaxValues(Math.min(currentPageEmojis.length, 10))
             .addOptions(emojiOptions);
 
         const actionRow = new ActionRowBuilder().addComponents(selectMenu);
+
+        // 分页按钮
+        const navigationRow = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('emoji_prev_page')
+                    .setLabel('上一页')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(pageIndex === 0),
+                new ButtonBuilder()
+                    .setCustomId('emoji_next_page')
+                    .setLabel('下一页')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(pageIndex >= totalPages - 1),
+                new ButtonBuilder()
+                    .setCustomId('emoji_show_selected')
+                    .setLabel(`查看已选择(${serverConfig.selectedServerEmojis.length})`)
+                    .setStyle(ButtonStyle.Primary)
+            );
 
         const confirmButton = new ActionRowBuilder()
             .addComponents(
@@ -1394,7 +1535,7 @@ class BochiBot {
 
         await interaction.reply({
             embeds: [embed],
-            components: [actionRow, confirmButton],
+            components: [actionRow, navigationRow, confirmButton],
             flags: MessageFlags.Ephemeral
         });
     }
