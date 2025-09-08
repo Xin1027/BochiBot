@@ -2537,18 +2537,18 @@ class BochiBot {
         const adminCommands = [
             {
                 name: 'bochi',
-                description: '打开波奇机器人配置面板',
-                default_member_permissions: '0' // 只有管理员可见
+                description: '打开波奇机器人配置面板'
+                // 移除 default_member_permissions，让所有用户都能看到命令，由机器人内部权限系统控制使用权限
             },
             {
                 name: '频道设置',
-                description: '设置当前频道的波奇机器人配置',
-                default_member_permissions: '0' // 只有管理员可见
+                description: '设置当前频道的波奇机器人配置'
+                // 移除 default_member_permissions，让所有用户都能看到命令，由机器人内部权限系统控制使用权限
             },
             {
                 name: '频道统计',
-                description: '查看所有频道的反应统计信息',
-                default_member_permissions: '0' // 只有管理员可见
+                description: '查看所有频道的反应统计信息'
+                // 移除 default_member_permissions，让所有用户都能看到命令，由机器人内部权限系统控制使用权限
             }
         ];
         
@@ -2561,6 +2561,24 @@ class BochiBot {
             {
                 name: '允许bochi对我做出反应',
                 description: '允许波奇机器人对您的图片做出反应'
+            },
+            {
+                name: '测试我的权限',
+                description: '测试当前用户是否有机器人管理权限'
+            }
+        ];
+
+        // 仅服务器所有者可用的特殊命令（用于调试和管理）
+        const ownerOnlyCommands = [
+            {
+                name: '同步管理员权限',
+                description: '扫描并同步拥有BOT维护员角色的用户到管理员列表',
+                default_member_permissions: '0' // 只有Discord管理员可见
+            },
+            {
+                name: '调试角色信息',
+                description: '显示服务器角色和用户权限调试信息',
+                default_member_permissions: '0' // 只有Discord管理员可见
             }
         ];
 
@@ -2594,12 +2612,12 @@ class BochiBot {
                     // 等待片刻
                     await new Promise(resolve => setTimeout(resolve, 500));
                     
-                    // 注册所有命令（管理员命令只有管理员可见）
+                    // 注册所有命令
                     await rest.put(
                         Routes.applicationGuildCommands(this.client.user.id, guildId),
-                        { body: [...adminCommands, ...userCommands] }
+                        { body: [...adminCommands, ...userCommands, ...ownerOnlyCommands] }
                     );
-                    console.log(`✅ 在服务器 "${guild.name}" 中注册成功 (管理员命令: ${adminCommands.length}, 用户命令: ${userCommands.length})`);
+                    console.log(`✅ 在服务器 "${guild.name}" 中注册成功 (管理命令: ${adminCommands.length}, 用户命令: ${userCommands.length}, 所有者命令: ${ownerOnlyCommands.length})`);
                 } catch (guildError) {
                     console.error(`⚠️  在服务器 "${guild.name}" 中注册失败:`, guildError.message);
                 }
