@@ -247,8 +247,13 @@ class BochiBot {
             execute: async (interaction) => {
                 // 检查是否在允许的频道中
                 if (!this.checkChannelPermission(interaction)) {
+                    const allowedChannels = this.config.botSettings.allowedChannels || [];
+                    const channelList = allowedChannels.length > 0 
+                        ? allowedChannels.map(id => `<#${id}>`).join('、') 
+                        : '无（请联系管理员设置）';
+                    
                     return await interaction.reply({
-                        content: '❌ 此命令在当前频道不可用。',
+                        content: `❌ **此命令在当前频道不可用**\n\n📌 **允许使用的频道：** ${channelList}\n\nℹ️ 请在上述频道中使用此命令，或联系管理员添加更多允许频道。`,
                         flags: MessageFlags.Ephemeral
                     });
                 }
@@ -267,8 +272,13 @@ class BochiBot {
             execute: async (interaction) => {
                 // 检查是否在允许的频道中
                 if (!this.checkChannelPermission(interaction)) {
+                    const allowedChannels = this.config.botSettings.allowedChannels || [];
+                    const channelList = allowedChannels.length > 0 
+                        ? allowedChannels.map(id => `<#${id}>`).join('、') 
+                        : '无（请联系管理员设置）';
+                    
                     return await interaction.reply({
-                        content: '❌ 此命令在当前频道不可用。',
+                        content: `❌ **此命令在当前频道不可用**\n\n📌 **允许使用的频道：** ${channelList}\n\nℹ️ 请在上述频道中使用此命令，或联系管理员添加更多允许频道。`,
                         flags: MessageFlags.Ephemeral
                     });
                 }
@@ -1917,39 +1927,21 @@ class BochiBot {
         const member = interaction.member;
         if (!member) return false;
         
-        console.log(`🔍 权限检查 - 用户: ${member.user.tag}, 服务器: ${member.guild.name}`);
-        
         // 检查是否是服务器主（拥有者）
         if (member.guild.ownerId === member.id) {
-            console.log(`✅ 用户 ${member.user.tag} 是服务器所有者`);
             return true;
         }
         
         // 检查是否有"BOT维护员"角色
         const botMaintainerRole = member.guild.roles.cache.find(role => role.name === 'BOT维护员');
-        console.log(`🔍 BOT维护员角色检查: ${botMaintainerRole ? '存在' : '不存在'}`);
-        
-        if (botMaintainerRole) {
-            const hasRole = member.roles.cache.has(botMaintainerRole.id);
-            console.log(`🔍 用户 ${member.user.tag} ${hasRole ? '拥有' : '没有'} BOT维护员角色`);
-            if (hasRole) {
-                console.log(`✅ 用户 ${member.user.tag} 通过BOT维护员角色获得权限`);
-                return true;
-            }
-        }
-        
-        // 检查用户是否拥有手动添加的指定角色
-        const hasAllowedRole = this.config.botSettings.allowedRoles.some(roleId => 
-            member.roles.cache.has(roleId)
-        );
-        
-        if (hasAllowedRole) {
-            console.log(`✅ 用户 ${member.user.tag} 通过手动添加的角色获得权限`);
+        if (botMaintainerRole && member.roles.cache.has(botMaintainerRole.id)) {
             return true;
         }
         
-        console.log(`❌ 用户 ${member.user.tag} 没有管理权限`);
-        return false;
+        // 检查用户是否拥有手动添加的指定角色
+        return this.config.botSettings.allowedRoles.some(roleId => 
+            member.roles.cache.has(roleId)
+        );
     }
     
     // 检查普通用户是否可以在当前频道使用命令
