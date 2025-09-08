@@ -322,13 +322,32 @@ class BochiBot {
                 
                 if (message.attachments.size > 0) {
                     console.log(`📨 检测到新消息 (来自 ${message.author.username}) - 附件数量: ${message.attachments.size}`);
+                    
+                    // 收集所有图片附件
+                    const imageAttachments = [];
                     for (const attachment of message.attachments.values()) {
                         if (attachment.contentType && attachment.contentType.startsWith('image/')) {
                             console.log(`🖼️ 发现图片附件: ${attachment.name} (${attachment.contentType})`);
-                            await this.handleImageMessage(message, attachment);
+                            imageAttachments.push(attachment);
                         } else {
                             console.log(`📎 非图片附件: ${attachment.name} (${attachment.contentType || '未知类型'})`);
                         }
+                    }
+                    
+                    // 并发处理所有图片的表情反应（快速响应）
+                    if (imageAttachments.length > 0) {
+                        const reactionPromises = imageAttachments.map(attachment => 
+                            this.handleImageReaction(message, attachment)
+                        );
+                        
+                        // 并发执行所有表情反应，不等待结果
+                        Promise.allSettled(reactionPromises).then(results => {
+                            const successCount = results.filter(r => r.status === 'fulfilled').length;
+                            console.log(`🎨 表情反应完成: ${successCount}/${imageAttachments.length}`);
+                        });
+                        
+                        // AI点评队列处理（异步执行，不阻塞后续消息处理）
+                        this.processImageCommentsQueue(message, imageAttachments);
                     }
                 }
             });
@@ -853,7 +872,7 @@ class BochiBot {
         }
     }
 
-    async handleImageMessage(message, attachment) {
+    async handleImageReaction(message, attachment) {
         const channelId = message.channel.id;
         const channelName = message.channel.name;
         
@@ -892,6 +911,8 @@ class BochiBot {
                     this.config.botSettings.channelStats[channelId].reactionCount++;
                     this.config.botSettings.channelStats[channelId].lastUpdate = new Date();
                     this.config.botSettings.channelStats[channelId].name = channelName;
+                    
+                    return true;
                 } catch (error) {
                     console.error('添加反应失败:', error);
                     // 如果是自定义表情失败，尝试使用标准表情
@@ -902,30 +923,52 @@ class BochiBot {
                         try {
                             await message.react(fallbackEmoji);
                             console.log(`使用备用表情成功: ${fallbackEmoji}`);
+                            
+                            // 更新频道统计
+                            this.config.botSettings.channelStats[channelId].reactionCount++;
+                            this.config.botSettings.channelStats[channelId].lastUpdate = new Date();
+                            this.config.botSettings.channelStats[channelId].name = channelName;
+                            
+                            return true;
                         } catch (fallbackError) {
                             console.error('备用表情也失败:', fallbackError);
+                            return false;
                         }
                     }
+                    return false;
                 }
             }
         }
+        return false;
+    }
 
-        // AI点评功能 - 只有在配置了真实API时才进行点评
-        if (channelSettings.aiComment) {
+    async processImageCommentsQueue(message, imageAttachments) {
+        const channelId = message.channel.id;
+        const channelSettings = this.config.botSettings.channelSettings[channelId];
+        
+        // 检查是否开启AI点评且配置了API
+        if (!channelSettings.aiComment) {
+            return;
+        }
+        
+        const hasGeminiApi = this.config.apiSettings.useGemini && this.config.apiSettings.geminiApiKeys.length > 0;
+        const hasOpenAiApi = !this.config.apiSettings.useGemini && this.config.apiSettings.openaiApiKey;
+        
+        if (!hasGeminiApi && !hasOpenAiApi) {
+            console.log('ℹ️  AI点评功能已开启，但未配置API，跳过点评');
+            return;
+        }
+        
+        // 对每张图片进行点评（序列化处理，避免同时调用太多API）
+        for (const attachment of imageAttachments) {
             try {
-                let comment = null;
+                await message.channel.sendTyping();
                 
-                // 只有在配置了API时才进行点评
-                if (this.config.apiSettings.useGemini && this.config.apiSettings.geminiApiKeys.length > 0) {
-                    await message.channel.sendTyping();
+                let comment = null;
+                if (hasGeminiApi) {
                     comment = await this.getGeminiImageComment(attachment.url);
-                } else if (!this.config.apiSettings.useGemini && this.config.apiSettings.openaiApiKey) {
-                    await message.channel.sendTyping();
+                } else if (hasOpenAiApi) {
                     comment = await this.getOpenAIImageComment(attachment.url);
-                } else {
-                    // 没有配置API，不进行点评
-                    console.log('ℹ️  AI点评功能已开启，但未配置API，跳过点评');
-                    return;
                 }
 
                 if (comment) {
@@ -934,11 +977,23 @@ class BochiBot {
                 } else {
                     console.log('⚠️  AI点评返回为空，可能是API调用失败');
                 }
+                
+                // 在多图片情况下，每次点评间隔略作停顿，避免频繁调用
+                if (imageAttachments.length > 1) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
             } catch (error) {
                 console.error('AI点评失败:', error);
                 // 静默失败，不向用户显示错误
             }
         }
+    }
+
+    // 保留旧的handleImageMessage方法作为备用（如果需要）
+    async handleImageMessage(message, attachment) {
+        // 这个方法现在主要用于单独处理，多图片应使用上面的新方法
+        await this.handleImageReaction(message, attachment);
+        await this.processImageCommentsQueue(message, [attachment]);
     }
 
     async getGeminiImageComment(imageUrl) {
