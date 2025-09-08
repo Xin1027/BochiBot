@@ -26,7 +26,7 @@ class BochiBot {
                 aiComment: true,
                 reactionEmojis: ['👍', '❤️', '🎨', '✨', '🔥'],
                 allowedRoles: [], // 全局权限角色（向后兼容）
-                aiPrompt: '你是一位资深动漫爱好者，对动漫图片具有浓厚的兴趣。请用中文对这张图片进行真诚且具体的正面点评，从而给发送图片的人正反馈。控制在50字以内。', 
+                aiPrompt: '请用中文对这张图片进行简短的正面点评，语气要友好温馨。点评要真诚且具体，不要过于夸张。请控制在50字以内。', 
                 channelSettings: {}, // 按频道存储不同的设置 {channelId: {autoReaction: bool, aiComment: bool, ...}}
                 blockedUsers: new Set(), // 不希望被机器人反应的用户ID集合
                 channelStats: {}, // 频道统计信息 {channelId: {name: string, reactionCount: number, lastUpdate: Date}}
@@ -100,13 +100,8 @@ class BochiBot {
                 selectedServerEmojis: [], // 用户选择的服务器表情
                 allowedRoles: [], // 存储允许配置的角色ID
                 emojiPageIndex: 0, // 表情选择页面索引
-                tempSelectedEmojis: [], // 临时选择的表情
-                rolePageIndex: 0 // 角色选择页面索引
+                tempSelectedEmojis: [] // 临时选择的表情
             };
-        }
-        // 确保旧配置也有 rolePageIndex
-        if (typeof this.config.botSettings.serverConfigs[guildId].rolePageIndex === 'undefined') {
-            this.config.botSettings.serverConfigs[guildId].rolePageIndex = 0;
         }
         return this.config.botSettings.serverConfigs[guildId];
     }
@@ -220,6 +215,8 @@ class BochiBot {
             }
         };
 
+        this.commands.set(panelCommand.name, panelCommand);
+
         // 用户反应控制命令
         const blockCommand = {
             name: '限制bochi对我做出反应',
@@ -274,16 +271,14 @@ class BochiBot {
             }
         };
 
-        // 注册命令处理函数到本地集合
-        this.commands.set('bochi', panelCommand);
-        this.commands.set('限制bochi对我做出反应', blockCommand);
-        this.commands.set('允许bochi对我做出反应', unblockCommand);
-        this.commands.set('频道设置', channelCommand);
-        this.commands.set('频道统计', statsCommand);
+        this.commands.set(blockCommand.name, blockCommand);
+        this.commands.set(unblockCommand.name, unblockCommand);
+        this.commands.set(channelCommand.name, channelCommand);
+        this.commands.set(statsCommand.name, statsCommand);
     }
 
     setupEventHandlers() {
-        this.client.once(Events.ClientReady, async () => {
+        this.client.once(Events.ClientReady, () => {
             console.log(`✅ 波奇机器人已启动! 登录为 ${this.client.user.tag}`);
             console.log(`🔧 权限模式: ${this.fullPermissions ? '完整权限 (可检测图片)' : '基础权限 (仅配置功能)'}`);
             console.log(`🔧 当前配置:`);
@@ -296,20 +291,7 @@ class BochiBot {
             } else {
                 console.log(`⚠️  图片检测功能需要启用 MESSAGE CONTENT INTENT 权限`);
             }
-            
             this.registerSlashCommands();
-            
-            // 为当前所有服务器注册命令
-            console.log(`正在为 ${this.client.guilds.cache.size} 个服务器注册命令...`);
-            for (const guild of this.client.guilds.cache.values()) {
-                await this.registerServerCommands(guild.id);
-            }
-        });
-        
-        // 当机器人加入新服务器时注册命令
-        this.client.on(Events.GuildCreate, async (guild) => {
-            console.log(`机器人加入了新服务器: ${guild.name}`);
-            await this.registerServerCommands(guild.id);
         });
 
         // 处理斜杠命令
@@ -601,34 +583,6 @@ class BochiBot {
                     }
                 }
                 break;
-            case 'role_prev_page':
-                const rolePrevGuild = interaction.guild;
-                if (rolePrevGuild) {
-                    const rolePrevServerConfig = this.getServerConfig(rolePrevGuild.id);
-                    if (rolePrevServerConfig.rolePageIndex > 0) {
-                        rolePrevServerConfig.rolePageIndex--;
-                    }
-                    await this.showPermissionSettings(interaction);
-                }
-                break;
-            case 'role_next_page':
-                const roleNextGuild = interaction.guild;
-                if (roleNextGuild) {
-                    const roleNextServerConfig = this.getServerConfig(roleNextGuild.id);
-                    const allRoles = roleNextGuild.roles.cache
-                        .filter(role => !role.managed && role.id !== roleNextGuild.id);
-                    const rolesPerPage = 25;
-                    const totalPages = Math.ceil(allRoles.size / rolesPerPage);
-                    if (roleNextServerConfig.rolePageIndex < totalPages - 1) {
-                        roleNextServerConfig.rolePageIndex++;
-                    }
-                    await this.showPermissionSettings(interaction);
-                }
-                break;
-            case 'role_clear_selection':
-                this.config.botSettings.allowedRoles = [];
-                await this.showPermissionSettings(interaction);
-                break;
         }
         
         // 处理频道特定的按钮（动态ID）
@@ -787,84 +741,47 @@ class BochiBot {
 
     async showPermissionSettings(interaction) {
         const guild = interaction.guild;
-        
-        // 获取或创建服务器角色配置
-        const serverConfig = this.getServerConfig(guild.id);
-        if (!serverConfig.rolePageIndex) {
-            serverConfig.rolePageIndex = 0;
-        }
-        
         const allowedRoles = this.config.botSettings.allowedRoles
             .map(roleId => guild.roles.cache.get(roleId)?.name || '未知角色')
             .join(', ') || '无';
 
-        // 获取所有可用角色
-        const allRoles = guild.roles.cache
-            .filter(role => !role.managed && role.id !== guild.id)
-            .sort((a, b) => b.position - a.position); // 按位置排序
-        
-        const rolesArray = Array.from(allRoles.values());
-        const rolesPerPage = 25;
-        const totalPages = Math.ceil(rolesArray.length / rolesPerPage);
-        const currentPage = serverConfig.rolePageIndex;
-        const startIndex = currentPage * rolesPerPage;
-        const endIndex = Math.min(startIndex + rolesPerPage, rolesArray.length);
-        const currentPageRoles = rolesArray.slice(startIndex, endIndex);
-
         const embed = new EmbedBuilder()
             .setColor('#FFB6C1')
             .setTitle('🔒 权限设置')
-            .setDescription(`当前服务器: ${guild.name}\n\n角色页面: ${currentPage + 1}/${totalPages} (显示 ${startIndex + 1}-${endIndex})`)
             .addFields(
                 { name: '👥 允许的角色', value: allowedRoles, inline: false },
-                { name: '💡 说明', value: '只有拥有指定角色的用户才能使用机器人配置功能', inline: false },
-                { name: '📋 统计', value: `共 ${rolesArray.length} 个角色，已选择 ${this.config.botSettings.allowedRoles.length} 个`, inline: true }
+                { name: '💡 说明', value: '只有拥有指定角色的用户才能使用机器人配置功能', inline: false }
             );
 
-        const components = [];
-        
-        if (currentPageRoles.length > 0) {
+        // 创建角色选择菜单
+        const roles = guild.roles.cache
+            .filter(role => !role.managed && role.id !== guild.id)
+            .first(25); // Discord限制最多25个选项
+
+        if (roles.length > 0) {
             const selectMenu = new StringSelectMenuBuilder()
                 .setCustomId('select_allowed_roles')
                 .setPlaceholder('选择允许的角色')
-                .setMaxValues(Math.min(currentPageRoles.length, 10))
-                .addOptions(currentPageRoles.map(role => ({
+                .setMaxValues(Math.min(roles.length, 10))
+                .addOptions(roles.map(role => ({
                     label: role.name,
                     value: role.id,
                     description: `成员数: ${role.members.size}`,
                     default: this.config.botSettings.allowedRoles.includes(role.id)
                 })));
-            
-            components.push(new ActionRowBuilder().addComponents(selectMenu));
-        }
-        
-        // 分页按钮
-        if (totalPages > 1) {
-            const navigationRow = new ActionRowBuilder()
-                .addComponents(
-                    new ButtonBuilder()
-                        .setCustomId('role_prev_page')
-                        .setLabel('上一页')
-                        .setStyle(ButtonStyle.Secondary)
-                        .setDisabled(currentPage === 0),
-                    new ButtonBuilder()
-                        .setCustomId('role_next_page')
-                        .setLabel('下一页')
-                        .setStyle(ButtonStyle.Secondary)
-                        .setDisabled(currentPage >= totalPages - 1),
-                    new ButtonBuilder()
-                        .setCustomId('role_clear_selection')
-                        .setLabel('清除所有选择')
-                        .setStyle(ButtonStyle.Danger)
-                        .setDisabled(this.config.botSettings.allowedRoles.length === 0)
-                );
-            components.push(navigationRow);
-        }
 
-        await interaction.update({
-            embeds: [embed],
-            components: components
-        });
+            const row = new ActionRowBuilder().addComponents(selectMenu);
+
+            await interaction.update({
+                embeds: [embed],
+                components: [row]
+            });
+        } else {
+            await interaction.update({
+                embeds: [embed],
+                components: []
+            });
+        }
     }
 
     async showGeminiModal(interaction) {
@@ -1793,27 +1710,16 @@ class BochiBot {
     }
 
     checkPermission(interaction) {
-        const member = interaction.member;
-        
-        // 检查用户是否是服务器管理员
-        if (member.permissions.has('Administrator')) {
+        // 如果没有设置任何角色权限，则默认允许所有人使用
+        if (this.config.botSettings.allowedRoles.length === 0) {
             return true;
         }
-        
-        // 检查用户是否拥有服务器管理权限
-        if (member.permissions.has('ManageGuild')) {
-            return true;
-        }
-        
+
         // 检查用户是否拥有指定的角色
-        if (this.config.botSettings.allowedRoles.length > 0) {
-            return this.config.botSettings.allowedRoles.some(roleId => 
-                member.roles.cache.has(roleId)
-            );
-        }
-        
-        // 如果没有设置任何角色且不是管理员，则拒绝访问
-        return false;
+        const member = interaction.member;
+        return this.config.botSettings.allowedRoles.some(roleId => 
+            member.roles.cache.has(roleId)
+        );
     }
 
     async showSystemManage(interaction) {
@@ -2077,50 +1983,40 @@ class BochiBot {
     }
 
     async registerSlashCommands() {
-        // 不再注册全局命令，改为按服务器注册
-        console.log('✅ 使用服务器特定命令模式，不注册全局命令');
-    }
-    
-    async registerServerCommands(guildId) {
         const commands = [
             {
                 name: 'bochi',
-                description: '打开波奇机器人配置面板',
-                default_member_permissions: '0' // 需要管理员权限
+                description: '打开波奇机器人配置面板'
             },
             {
                 name: '限制bochi对我做出反应',
                 description: '阻止波奇机器人对您的图片做出反应'
-                // 这个命令所有人都可以使用
             },
             {
                 name: '允许bochi对我做出反应',
                 description: '允许波奇机器人对您的图片做出反应'
-                // 这个命令所有人都可以使用
             },
             {
                 name: '频道设置',
-                description: '设置当前频道的波奇机器人配置',
-                default_member_permissions: '0' // 需要管理员权限
+                description: '设置当前频道的波奇机器人配置'
             },
             {
                 name: '频道统计',
-                description: '查看所有频道的反应统计信息',
-                default_member_permissions: '0' // 需要管理员权限
+                description: '查看所有频道的反应统计信息'
             }
         ];
 
         const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
         try {
-            console.log(`开始为服务器 ${guildId} 注册斜杠命令...`);
+            console.log('开始注册斜杠命令...');
             await rest.put(
-                Routes.applicationGuildCommands(this.client.user.id, guildId),
+                Routes.applicationCommands(this.client.user.id),
                 { body: commands }
             );
-            console.log(`✅ 服务器 ${guildId} 的斜杠命令注册成功！`);
+            console.log('✅ 斜杠命令注册成功！');
         } catch (error) {
-            console.error(`服务器 ${guildId} 的斜杠命令注册失败:`, error);
+            console.error('斜杠命令注册失败:', error);
         }
     }
 
