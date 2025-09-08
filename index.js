@@ -2194,31 +2194,34 @@ class BochiBot {
     }
 
     async registerSlashCommands() {
-        const commands = [
+        // 管理员专用命令（只有管理员可以看到和使用）
+        const adminCommands = [
             {
                 name: 'bochi',
-                description: '打开波奇机器人配置面板'
-                // 权限检查在命令执行内部进行
+                description: '打开波奇机器人配置面板',
+                default_member_permissions: '0' // 只有管理员可见
             },
+            {
+                name: '频道设置',
+                description: '设置当前频道的波奇机器人配置',
+                default_member_permissions: '0' // 只有管理员可见
+            },
+            {
+                name: '频道统计',
+                description: '查看所有频道的反应统计信息',
+                default_member_permissions: '0' // 只有管理员可见
+            }
+        ];
+        
+        // 普通用户可用命令（所有人都可以看到，但只能在指定频道使用）
+        const userCommands = [
             {
                 name: '限制bochi对我做出反应',
                 description: '阻止波奇机器人对您的图片做出反应'
-                // 所有用户可见
             },
             {
                 name: '允许bochi对我做出反应',
                 description: '允许波奇机器人对您的图片做出反应'
-                // 所有用户可见
-            },
-            {
-                name: '频道设置',
-                description: '设置当前频道的波奇机器人配置'
-                // 权限检查在命令执行内部进行
-            },
-            {
-                name: '频道统计',
-                description: '查看所有频道的反应统计信息'
-                // 权限检查在命令执行内部进行
             }
         ];
 
@@ -2252,12 +2255,12 @@ class BochiBot {
                     // 等待片刻
                     await new Promise(resolve => setTimeout(resolve, 500));
                     
-                    // 注册新命令
+                    // 注册所有命令（管理员命令只有管理员可见）
                     await rest.put(
                         Routes.applicationGuildCommands(this.client.user.id, guildId),
-                        { body: commands }
+                        { body: [...adminCommands, ...userCommands] }
                     );
-                    console.log(`✅ 在服务器 "${guild.name}" 中注册成功`);
+                    console.log(`✅ 在服务器 "${guild.name}" 中注册成功 (管理员命令: ${adminCommands.length}, 用户命令: ${userCommands.length})`);
                 } catch (guildError) {
                     console.error(`⚠️  在服务器 "${guild.name}" 中注册失败:`, guildError.message);
                 }
