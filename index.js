@@ -6,8 +6,8 @@ require('dotenv').config();
 class BochiBot {
     constructor() {
         // 尝试使用完整权限，如果失败则降级到基础权限
-        this.fullPermissions = false;  // 先用基础权限启动
-        this.client = this.createClient(false);
+        this.fullPermissions = true;  // 直接使用完整权限启动
+        this.client = this.createClient(true);
         
         // 监听连接错误
         this.client.on('error', (error) => {
@@ -29,7 +29,10 @@ class BochiBot {
                 serverEmojisCache: [], // 缓存所有服务器表情
                 selectedServerEmojis: [], // 用户选择的服务器表情
                 allowedRoles: [], // 存储允许配置的角色ID
-                aiPrompt: '请用中文对这张图片进行简短的正面点评，语气要友好温馨，就像可爱的小狗波奇在夸奖主人一样。点评要真诚且具体，不要过于夸张。请控制在50字以内。' // AI点评提示词
+                aiPrompt: '请用中文对这张图片进行简短的正面点评，语气要友好温馨，就像可爱的小狗波奇在夸奖主人一样。点评要真诚且具体，不要过于夸张。请控制在50字以内。', // AI点评提示词
+                channelSettings: {}, // 按频道存储不同的设置 {channelId: {autoReaction: bool, aiComment: bool, ...}}
+                blockedUsers: new Set(), // 不希望被机器人反应的用户ID集合
+                channelStats: {} // 频道统计信息 {channelId: {name: string, reactionCount: number, lastUpdate: Date}}
             },
             apiSettings: {
                 geminiApiKeys: [],
@@ -139,6 +142,65 @@ class BochiBot {
         };
 
         this.commands.set(panelCommand.name, panelCommand);
+
+        // 用户反应控制命令
+        const blockCommand = {
+            name: '限制bochi对我做出反应',
+            description: '阻止波奇机器人对您的图片做出反应',
+            execute: async (interaction) => {
+                this.config.botSettings.blockedUsers.add(interaction.user.id);
+                await interaction.reply({
+                    content: '✅ 已设置成功！波奇不会再对您的图片做出反应。',
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+        };
+
+        const unblockCommand = {
+            name: '允许bochi对我做出反应',
+            description: '允许波奇机器人对您的图片做出反应',
+            execute: async (interaction) => {
+                this.config.botSettings.blockedUsers.delete(interaction.user.id);
+                await interaction.reply({
+                    content: '✅ 已设置成功！波奇现在可以对您的图片做出反应了。',
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+        };
+
+        // 频道管理命令
+        const channelCommand = {
+            name: '频道设置',
+            description: '设置当前频道的波奇机器人配置',
+            execute: async (interaction) => {
+                if (!this.checkPermission(interaction)) {
+                    return await interaction.reply({
+                        content: '❌ 您没有权限使用此命令。请联系管理员。',
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
+                await this.showChannelSettings(interaction);
+            }
+        };
+
+        const statsCommand = {
+            name: '频道统计',
+            description: '查看所有频道的反应统计信息',
+            execute: async (interaction) => {
+                if (!this.checkPermission(interaction)) {
+                    return await interaction.reply({
+                        content: '❌ 您没有权限使用此命令。请联系管理员。',
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
+                await this.showChannelStats(interaction);
+            }
+        };
+
+        this.commands.set(blockCommand.name, blockCommand);
+        this.commands.set(unblockCommand.name, unblockCommand);
+        this.commands.set(channelCommand.name, channelCommand);
+        this.commands.set(statsCommand.name, statsCommand);
     }
 
     setupEventHandlers() {
@@ -213,6 +275,11 @@ class BochiBot {
         if (this.fullPermissions) {
             this.client.on(Events.MessageCreate, async (message) => {
                 if (message.author.bot) return;
+                
+                // 检查用户是否被阻止
+                if (this.config.botSettings.blockedUsers.has(message.author.id)) {
+                    return; // 被阻止的用户，不处理其消息
+                }
                 
                 if (message.attachments.size > 0) {
                     console.log(`📨 检测到新消息 (来自 ${message.author.username}) - 附件数量: ${message.attachments.size}`);
@@ -310,6 +377,31 @@ class BochiBot {
             case 'test_permissions':
                 await this.testPermissions(interaction);
                 break;
+        }
+        
+        // 处理频道特定的按钮（动态ID）
+        if (interaction.customId.startsWith('toggle_channel_reaction_')) {
+            const channelId = interaction.customId.replace('toggle_channel_reaction_', '');
+            if (!this.config.botSettings.channelSettings[channelId]) {
+                this.config.botSettings.channelSettings[channelId] = {
+                    autoReaction: this.config.botSettings.autoReaction,
+                    aiComment: this.config.botSettings.aiComment
+                };
+            }
+            this.config.botSettings.channelSettings[channelId].autoReaction = 
+                !this.config.botSettings.channelSettings[channelId].autoReaction;
+            await this.showChannelSettings(interaction);
+        } else if (interaction.customId.startsWith('toggle_channel_comment_')) {
+            const channelId = interaction.customId.replace('toggle_channel_comment_', '');
+            if (!this.config.botSettings.channelSettings[channelId]) {
+                this.config.botSettings.channelSettings[channelId] = {
+                    autoReaction: this.config.botSettings.autoReaction,
+                    aiComment: this.config.botSettings.aiComment
+                };
+            }
+            this.config.botSettings.channelSettings[channelId].aiComment = 
+                !this.config.botSettings.channelSettings[channelId].aiComment;
+            await this.showChannelSettings(interaction);
         }
     }
 
@@ -694,8 +786,31 @@ class BochiBot {
     }
 
     async handleImageMessage(message, attachment) {
+        const channelId = message.channel.id;
+        const channelName = message.channel.name;
+        
+        // 初始化频道设置（如果不存在）
+        if (!this.config.botSettings.channelSettings[channelId]) {
+            this.config.botSettings.channelSettings[channelId] = {
+                autoReaction: this.config.botSettings.autoReaction,
+                aiComment: this.config.botSettings.aiComment
+            };
+        }
+        
+        // 初始化频道统计（如果不存在）
+        if (!this.config.botSettings.channelStats[channelId]) {
+            this.config.botSettings.channelStats[channelId] = {
+                name: channelName,
+                reactionCount: 0,
+                lastUpdate: new Date()
+            };
+        }
+        
+        // 使用频道特定设置
+        const channelSettings = this.config.botSettings.channelSettings[channelId];
+        
         // 自动反应功能
-        if (this.config.botSettings.autoReaction) {
+        if (channelSettings.autoReaction) {
             // 合并标准表情和选择的服务器表情
             const allEmojis = [...this.config.botSettings.reactionEmojis, ...this.config.botSettings.selectedServerEmojis];
             
@@ -704,6 +819,11 @@ class BochiBot {
                 try {
                     await message.react(randomEmoji);
                     console.log(`成功对图片添加反应: ${randomEmoji}`);
+                    
+                    // 更新频道统计
+                    this.config.botSettings.channelStats[channelId].reactionCount++;
+                    this.config.botSettings.channelStats[channelId].lastUpdate = new Date();
+                    this.config.botSettings.channelStats[channelId].name = channelName;
                 } catch (error) {
                     console.error('添加反应失败:', error);
                     // 如果是自定义表情失败，尝试使用标准表情
@@ -723,7 +843,7 @@ class BochiBot {
         }
 
         // AI点评功能
-        if (this.config.botSettings.aiComment) {
+        if (channelSettings.aiComment) {
             try {
                 await message.channel.sendTyping();
                 
@@ -1094,6 +1214,92 @@ class BochiBot {
         });
     }
 
+    async showChannelSettings(interaction) {
+        const channelId = interaction.channel.id;
+        const channelName = interaction.channel.name;
+        
+        // 初始化频道设置（如果不存在）
+        if (!this.config.botSettings.channelSettings[channelId]) {
+            this.config.botSettings.channelSettings[channelId] = {
+                autoReaction: this.config.botSettings.autoReaction,
+                aiComment: this.config.botSettings.aiComment
+            };
+        }
+        
+        const channelSettings = this.config.botSettings.channelSettings[channelId];
+        
+        const embed = new EmbedBuilder()
+            .setColor('#FFB6C1')
+            .setTitle('📺 频道设置')
+            .setDescription(`当前频道: #${channelName}`)
+            .addFields(
+                { name: '🎨 图片反应', value: channelSettings.autoReaction ? '✅ 开启' : '❌ 关闭', inline: true },
+                { name: '💬 AI点评', value: channelSettings.aiComment ? '✅ 开启' : '❌ 关闭', inline: true },
+                { name: '📊 反应统计', value: this.config.botSettings.channelStats[channelId]?.reactionCount?.toString() || '0', inline: true }
+            );
+
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`toggle_channel_reaction_${channelId}`)
+                    .setLabel(channelSettings.autoReaction ? '关闭反应' : '开启反应')
+                    .setStyle(channelSettings.autoReaction ? ButtonStyle.Danger : ButtonStyle.Success),
+                new ButtonBuilder()
+                    .setCustomId(`toggle_channel_comment_${channelId}`)
+                    .setLabel(channelSettings.aiComment ? '关闭点评' : '开启点评')
+                    .setStyle(channelSettings.aiComment ? ButtonStyle.Danger : ButtonStyle.Success)
+            );
+
+        await interaction.reply({
+            embeds: [embed],
+            components: [row],
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    async showChannelStats(interaction) {
+        const stats = this.config.botSettings.channelStats;
+        
+        if (Object.keys(stats).length === 0) {
+            await interaction.reply({
+                content: '📊 暂无频道统计数据。机器人需要在频道中处理图片后才会有统计信息。',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        const embed = new EmbedBuilder()
+            .setColor('#FFB6C1')
+            .setTitle('📊 频道反应统计')
+            .setDescription('以下是所有频道的波奇反应统计：');
+
+        // 按反应数量排序
+        const sortedChannels = Object.entries(stats)
+            .sort(([,a], [,b]) => b.reactionCount - a.reactionCount)
+            .slice(0, 10); // 显示前10个频道
+
+        for (const [channelId, channelStat] of sortedChannels) {
+            const channel = interaction.guild.channels.cache.get(channelId);
+            const channelName = channel ? `#${channel.name}` : channelStat.name;
+            const lastUpdate = channelStat.lastUpdate ? 
+                new Date(channelStat.lastUpdate).toLocaleDateString('zh-CN') : '未知';
+            
+            embed.addFields({
+                name: channelName,
+                value: `反应次数: ${channelStat.reactionCount}\n最后活动: ${lastUpdate}`,
+                inline: true
+            });
+        }
+
+        const totalReactions = Object.values(stats).reduce((sum, stat) => sum + stat.reactionCount, 0);
+        embed.setFooter({ text: `总反应次数: ${totalReactions}` });
+
+        await interaction.reply({
+            embeds: [embed],
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
     checkPermission(interaction) {
         // 如果没有设置任何角色权限，则默认允许所有人使用
         if (this.config.botSettings.allowedRoles.length === 0) {
@@ -1112,6 +1318,22 @@ class BochiBot {
             {
                 name: 'bochi',
                 description: '打开波奇机器人配置面板'
+            },
+            {
+                name: '限制bochi对我做出反应',
+                description: '阻止波奇机器人对您的图片做出反应'
+            },
+            {
+                name: '允许bochi对我做出反应',
+                description: '允许波奇机器人对您的图片做出反应'
+            },
+            {
+                name: '频道设置',
+                description: '设置当前频道的波奇机器人配置'
+            },
+            {
+                name: '频道统计',
+                description: '查看所有频道的反应统计信息'
             }
         ];
 
