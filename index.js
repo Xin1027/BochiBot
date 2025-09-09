@@ -756,25 +756,33 @@ class BochiBot {
         // 处理频道特定的按钮（动态ID）
         if (interaction.customId.startsWith('toggle_channel_reaction_')) {
             const channelId = interaction.customId.replace('toggle_channel_reaction_', '');
-            if (!this.config.botSettings.channelSettings[channelId]) {
-                this.config.botSettings.channelSettings[channelId] = {
-                    autoReaction: this.config.botSettings.autoReaction,
-                    aiComment: this.config.botSettings.aiComment
-                };
+            const guildId = interaction.guild?.id;
+            if (guildId) {
+                const serverConfig = this.getServerConfig(guildId);
+                if (!serverConfig.channelSettings[channelId]) {
+                    serverConfig.channelSettings[channelId] = {
+                        autoReaction: serverConfig.autoReaction,
+                        aiComment: serverConfig.aiComment
+                    };
+                }
+                serverConfig.channelSettings[channelId].autoReaction = 
+                    !serverConfig.channelSettings[channelId].autoReaction;
             }
-            this.config.botSettings.channelSettings[channelId].autoReaction = 
-                !this.config.botSettings.channelSettings[channelId].autoReaction;
             await this.showChannelSettings(interaction);
         } else if (interaction.customId.startsWith('toggle_channel_comment_')) {
             const channelId = interaction.customId.replace('toggle_channel_comment_', '');
-            if (!this.config.botSettings.channelSettings[channelId]) {
-                this.config.botSettings.channelSettings[channelId] = {
-                    autoReaction: this.config.botSettings.autoReaction,
-                    aiComment: this.config.botSettings.aiComment
-                };
+            const guildId = interaction.guild?.id;
+            if (guildId) {
+                const serverConfig = this.getServerConfig(guildId);
+                if (!serverConfig.channelSettings[channelId]) {
+                    serverConfig.channelSettings[channelId] = {
+                        autoReaction: serverConfig.autoReaction,
+                        aiComment: serverConfig.aiComment
+                    };
+                }
+                serverConfig.channelSettings[channelId].aiComment = 
+                    !serverConfig.channelSettings[channelId].aiComment;
             }
-            this.config.botSettings.channelSettings[channelId].aiComment = 
-                !this.config.botSettings.channelSettings[channelId].aiComment;
             await this.showChannelSettings(interaction);
         }
     }
