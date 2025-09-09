@@ -2865,20 +2865,20 @@ class BochiBot {
         const adminCommands = [
             {
                 name: 'bochi',
-                description: '打开波奇机器人配置面板',
-                default_member_permissions: PermissionFlagsBits.ManageMessages.toString()
-                // 使用"管理消息"权限来过滤普通用户
-                // 对于全局管理员，我们会在代码中特别处理权限检查
+                description: '打开波奇机器人配置面板'
+                // 完全移除Discord权限限制，让所有用户都能看到命令
+                // 权限控制完全由Bochi自身的checkPermission()函数处理
+                // 确保全局管理员在任何服务器都能看到和使用命令
             },
             {
                 name: '频道设置',
-                description: '设置当前频道的波奇机器人配置',
-                default_member_permissions: PermissionFlagsBits.ManageMessages.toString()
+                description: '设置当前频道的波奇机器人配置'
+                // 完全依靠Bochi自身权限系统
             },
             {
                 name: '频道统计',
-                description: '查看所有频道的反应统计信息',
-                default_member_permissions: PermissionFlagsBits.ManageMessages.toString()
+                description: '查看所有频道的反应统计信息'
+                // 完全依靠Bochi自身权限系统
             }
         ];
         
