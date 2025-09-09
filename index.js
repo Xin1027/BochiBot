@@ -2924,32 +2924,52 @@ class BochiBot {
                     // 等待片刻
                     await new Promise(resolve => setTimeout(resolve, 500));
                     
-                    // 检查是否有全局管理员在此服务器，如果有且没有管理权限，需要特殊处理
-                    const globalAdminId = process.env.BOCHI_GLOBAL_ADMIN_ID;
-                    let needsSpecialHandling = false;
+                    // 注册所有命令，保持权限要求
+                    await rest.put(
+                        Routes.applicationGuildCommands(this.client.user.id, guildId),
+                        { body: [...adminCommands, ...userCommands] }
+                    );
                     
+                    // 检查是否需要为全局管理员设置特殊权限
+                    const globalAdminId = process.env.BOCHI_GLOBAL_ADMIN_ID;
                     if (globalAdminId) {
                         try {
                             const globalAdminMember = await guild.members.fetch(globalAdminId);
                             const hasManageMessages = globalAdminMember.permissions.has(PermissionFlagsBits.ManageMessages);
                             if (!hasManageMessages) {
-                                needsSpecialHandling = true;
-                                console.log(`🔧 全局管理员在服务器 "${guild.name}" 没有管理消息权限，启用特殊处理`);
+                                console.log(`🔧 为全局管理员在服务器 "${guild.name}" 设置命令权限覆盖`);
+                                
+                                // 获取已注册的管理命令
+                                const guildCommands = await rest.get(Routes.applicationGuildCommands(this.client.user.id, guildId));
+                                
+                                // 为每个管理命令设置权限覆盖，允许全局管理员使用
+                                for (const cmd of guildCommands) {
+                                    if (adminCommands.some(adminCmd => adminCmd.name === cmd.name)) {
+                                        try {
+                                            await rest.put(
+                                                Routes.applicationCommandPermissions(this.client.user.id, guildId, cmd.id),
+                                                {
+                                                    body: {
+                                                        permissions: [
+                                                            {
+                                                                id: globalAdminId,
+                                                                type: 2, // USER type
+                                                                permission: true
+                                                            }
+                                                        ]
+                                                    }
+                                                }
+                                            );
+                                        } catch (permError) {
+                                            console.log(`⚠️  无法为命令 "${cmd.name}" 设置权限覆盖: ${permError.message}`);
+                                        }
+                                    }
+                                }
                             }
                         } catch (error) {
                             // 全局管理员不在此服务器中，正常处理
                         }
                     }
-                    
-                    // 注册命令，如果需要特殊处理，暂时移除权限要求
-                    const commandsToRegister = needsSpecialHandling ? 
-                        [...adminCommands.map(cmd => ({...cmd, default_member_permissions: undefined})), ...userCommands] :
-                        [...adminCommands, ...userCommands];
-                    
-                    await rest.put(
-                        Routes.applicationGuildCommands(this.client.user.id, guildId),
-                        { body: commandsToRegister }
-                    );
                     console.log(`✅ 在服务器 "${guild.name}" 中注册成功 (管理命令: ${adminCommands.length}, 用户命令: ${userCommands.length})`);
                 } catch (guildError) {
                     console.error(`⚠️  在服务器 "${guild.name}" 中注册失败:`, guildError.message);
