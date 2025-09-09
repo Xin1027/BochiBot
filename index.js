@@ -97,6 +97,10 @@ class BochiBot {
     getServerConfig(guildId) {
         if (!this.config.botSettings.serverConfigs[guildId]) {
             this.config.botSettings.serverConfigs[guildId] = {
+                // 服务器独立的功能设置
+                autoReaction: true, // 服务器默认开启图片反应
+                aiComment: true, // 服务器默认开启AI点评
+                
                 customEmojis: [], // 存储服务器自定义表情
                 serverEmojisCache: [], // 缓存所有服务器表情
                 selectedServerEmojis: [], // 用户选择的服务器表情
@@ -104,7 +108,8 @@ class BochiBot {
                 emojiPageIndex: 0, // 表情选择页面索引
                 tempSelectedEmojis: [], // 临时选择的表情
                 rolePageIndex: 0, // 角色选择页面索引
-                rolesCache: [] // 缓存服务器角色列表
+                rolesCache: [], // 缓存服务器角色列表
+                channelSettings: {} // 服务器内频道设置 {channelId: {autoReaction: bool, aiComment: bool, ...}}
             };
         }
         return this.config.botSettings.serverConfigs[guildId];
@@ -114,6 +119,37 @@ class BochiBot {
     getServerEmojisForReaction(guildId) {
         const serverConfig = this.getServerConfig(guildId);
         return [...this.config.botSettings.reactionEmojis, ...serverConfig.selectedServerEmojis];
+    }
+
+    // 获取服务器特定设置，带有全局设置作为后备
+    getServerSetting(guildId, settingName, channelId = null) {
+        const serverConfig = this.getServerConfig(guildId);
+        
+        // 如果指定了频道，优先检查频道设置
+        if (channelId) {
+            const channelSettings = serverConfig.channelSettings[channelId];
+            if (channelSettings && channelSettings.hasOwnProperty(settingName)) {
+                return channelSettings[settingName];
+            }
+        }
+        
+        // 检查服务器设置
+        if (serverConfig.hasOwnProperty(settingName)) {
+            return serverConfig[settingName];
+        }
+        
+        // 最后才使用全局设置作为后备
+        return this.config.botSettings[settingName];
+    }
+
+    // 获取当前页面的表情范围（用于表情选择逻辑）
+    getCurrentPageEmojiRange(serverConfig) {
+        const emojisPerPage = 25;
+        const pageIndex = serverConfig.emojiPageIndex || 0;
+        const cachedEmojis = serverConfig.serverEmojisCache;
+        const startIndex = pageIndex * emojisPerPage;
+        const endIndex = Math.min(startIndex + emojisPerPage, cachedEmojis.length);
+        return cachedEmojis.slice(startIndex, endIndex);
     }
 
     // 检查频道权限（用于全员可用的命令）
@@ -162,8 +198,8 @@ class BochiBot {
                     .setTitle('🐕 波奇机器人控制面板')
                     .setDescription('📊 **系统状态概览**')
                     .addFields(
-                        { name: '🎨 全局图片反应', value: this.config.botSettings.autoReaction ? '✅ 开启' : '❌ 关闭', inline: true },
-                        { name: '💬 全局AI点评', value: this.config.botSettings.aiComment ? '✅ 开启' : '❌ 关闭', inline: true },
+                        { name: '🎨 本服务器图片反应', value: interaction.guild ? (this.getServerConfig(interaction.guild.id).autoReaction ? '✅ 开启' : '❌ 关闭') : '未知', inline: true },
+                        { name: '💬 本服务器AI点评', value: interaction.guild ? (this.getServerConfig(interaction.guild.id).aiComment ? '✅ 开启' : '❌ 关闭') : '未知', inline: true },
                         { name: '🤖 AI服务状态', value: apiStatus, inline: true },
                         { name: '📺 管理频道数', value: totalChannels.toString(), inline: true },
                         { name: '📊 总反应次数', value: totalReactions.toString(), inline: true },
@@ -332,8 +368,8 @@ class BochiBot {
             console.log(`✅ 波奇机器人已启动! 登录为 ${this.client.user.tag}`);
             console.log(`🔧 权限模式: ${this.fullPermissions ? '完整权限 (可检测图片)' : '基础权限 (仅配置功能)'}`);
             console.log(`🔧 当前配置:`);
-            console.log(`   - 图片反应: ${this.config.botSettings.autoReaction ? '开启' : '关闭'}`);
-            console.log(`   - AI点评: ${this.config.botSettings.aiComment ? '开启' : '关闭'}`);
+            console.log(`   - 图片反应: 各服务器独立配置`);
+            console.log(`   - AI点评: 各服务器独立配置`);
             console.log(`   - 标准表情数量: ${this.config.botSettings.reactionEmojis.length}`);
             console.log(`   - 服务器配置数量: ${Object.keys(this.config.botSettings.serverConfigs).length}`);
             if (this.fullPermissions) {
@@ -492,11 +528,19 @@ class BochiBot {
                 await this.showChannelAllowedSettings(interaction);
                 break;
             case 'toggle_reaction':
-                this.config.botSettings.autoReaction = !this.config.botSettings.autoReaction;
+                const guildId = interaction.guild?.id;
+                if (guildId) {
+                    const serverConfig = this.getServerConfig(guildId);
+                    serverConfig.autoReaction = !serverConfig.autoReaction;
+                }
                 await this.showBotSettings(interaction);
                 break;
             case 'toggle_comment':
-                this.config.botSettings.aiComment = !this.config.botSettings.aiComment;
+                const commentGuildId = interaction.guild?.id;
+                if (commentGuildId) {
+                    const serverConfig = this.getServerConfig(commentGuildId);
+                    serverConfig.aiComment = !serverConfig.aiComment;
+                }
                 await this.showBotSettings(interaction);
                 break;
             case 'edit_emojis':
@@ -844,13 +888,17 @@ class BochiBot {
         const selectedServerEmojis = serverConfig ? serverConfig.selectedServerEmojis : [];
         const cachedEmojisCount = serverConfig ? serverConfig.serverEmojisCache.length : 0;
         
+        // 获取服务器特定设置
+        const autoReactionStatus = serverConfig ? serverConfig.autoReaction : this.config.botSettings.autoReaction;
+        const aiCommentStatus = serverConfig ? serverConfig.aiComment : this.config.botSettings.aiComment;
+        
         const embed = new EmbedBuilder()
             .setColor('#FFB6C1')
             .setTitle('🐕 机器人设置')
             .setDescription(guild ? `当前服务器: ${guild.name}` : '未知服务器')
             .addFields(
-                { name: '🎨 自动图片反应', value: this.config.botSettings.autoReaction ? '✅ 开启' : '❌ 关闭', inline: true },
-                { name: '💬 AI图片点评', value: this.config.botSettings.aiComment ? '✅ 开启' : '❌ 关闭', inline: true },
+                { name: '🎨 自动图片反应', value: autoReactionStatus ? '✅ 开启' : '❌ 关闭', inline: true },
+                { name: '💬 AI图片点评', value: aiCommentStatus ? '✅ 开启' : '❌ 关闭', inline: true },
                 { name: '😊 标准表情', value: this.config.botSettings.reactionEmojis.join(' '), inline: false },
                 { name: '🎭 本服务器已选表情', value: selectedServerEmojis.length > 0 ? selectedServerEmojis.slice(0, 8).join(' ') + (selectedServerEmojis.length > 8 ? `等${selectedServerEmojis.length}个...` : '') : '无', inline: false },
                 { name: '📊 本服务器表情缓存', value: `${cachedEmojisCount} 个`, inline: true }
@@ -860,12 +908,12 @@ class BochiBot {
             .addComponents(
                 new ButtonBuilder()
                     .setCustomId('toggle_reaction')
-                    .setLabel(this.config.botSettings.autoReaction ? '关闭反应' : '开启反应')
-                    .setStyle(this.config.botSettings.autoReaction ? ButtonStyle.Danger : ButtonStyle.Success),
+                    .setLabel(autoReactionStatus ? '关闭反应' : '开启反应')
+                    .setStyle(autoReactionStatus ? ButtonStyle.Danger : ButtonStyle.Success),
                 new ButtonBuilder()
                     .setCustomId('toggle_comment')
-                    .setLabel(this.config.botSettings.aiComment ? '关闭点评' : '开启点评')
-                    .setStyle(this.config.botSettings.aiComment ? ButtonStyle.Danger : ButtonStyle.Success)
+                    .setLabel(aiCommentStatus ? '关闭点评' : '开启点评')
+                    .setStyle(aiCommentStatus ? ButtonStyle.Danger : ButtonStyle.Success)
             );
 
         const row2 = new ActionRowBuilder()
@@ -1323,10 +1371,18 @@ class BochiBot {
                     break;
                 }
                 const emojiServerConfig = this.getServerConfig(emojiGuild.id);
-                // 临时存储选择的表情到服务器配置中
-                emojiServerConfig.tempSelectedEmojis = interaction.values;
+                // 合并当前页选择的表情与之前页选择的表情
+                const currentPageEmojis = new Set(interaction.values);
+                const existingEmojis = new Set(emojiServerConfig.tempSelectedEmojis);
+                
+                // 先移除当前页面的所有表情（防止重复），然后添加新选择的表情
+                const currentPageRange = this.getCurrentPageEmojiRange(emojiServerConfig);
+                currentPageRange.forEach(emoji => existingEmojis.delete(emoji));
+                currentPageEmojis.forEach(emoji => existingEmojis.add(emoji));
+                
+                emojiServerConfig.tempSelectedEmojis = Array.from(existingEmojis);
                 await interaction.reply({
-                    content: `✅ 已选择 ${interaction.values.length} 个表情，请点击"确认选择"来应用更改。`,
+                    content: `✅ 已选择 ${interaction.values.length} 个表情，总计选择 ${emojiServerConfig.tempSelectedEmojis.length} 个表情，请点击"确认选择"来应用更改。`,
                     flags: MessageFlags.Ephemeral
                 });
                 break;
@@ -1527,11 +1583,8 @@ class BochiBot {
             };
         }
         
-        // 获取有效的反应设置：频道设置优先，否则使用全局设置
-        const channelSettings = this.config.botSettings.channelSettings[channelId];
-        const shouldReact = channelSettings && channelSettings.hasOwnProperty('autoReaction') 
-            ? channelSettings.autoReaction 
-            : this.config.botSettings.autoReaction;
+        // 获取有效的反应设置：频道设置优先，然后是服务器设置，最后是全局设置
+        const shouldReact = this.getServerSetting(message.guild?.id, 'autoReaction', channelId);
         
         // 自动反应功能
         if (shouldReact) {
@@ -1585,12 +1638,9 @@ class BochiBot {
 
     async processImageCommentsQueue(message, imageAttachments) {
         const channelId = message.channel.id;
-        const channelSettings = this.config.botSettings.channelSettings[channelId];
         
-        // 获取有效的AI点评设置：频道设置优先，否则使用全局设置
-        const shouldComment = channelSettings && channelSettings.hasOwnProperty('aiComment') 
-            ? channelSettings.aiComment 
-            : this.config.botSettings.aiComment;
+        // 获取有效的AI点评设置：频道设置优先，然后是服务器设置，最后是全局设置
+        const shouldComment = this.getServerSetting(message.guild?.id, 'aiComment', channelId);
         
         // 检查是否开启AI点评且配置了API
         if (!shouldComment) {
@@ -1997,7 +2047,7 @@ class BochiBot {
                 label: emojiName,
                 value: emoji,
                 emoji: emoji,
-                default: serverConfig.selectedServerEmojis.includes(emoji)
+                default: serverConfig.tempSelectedEmojis.includes(emoji) || serverConfig.selectedServerEmojis.includes(emoji)
             };
         });
 
@@ -2006,7 +2056,8 @@ class BochiBot {
             .setTitle('🎭 选择服务器表情')
             .setDescription(`从 ${cachedEmojis.length} 个服务器表情中选择要用于反应的表情\n\n` +
                           `当前页面: ${pageIndex + 1}/${totalPages} (显示 ${startIndex + 1}-${endIndex})\n` +
-                          `当前已选择: ${serverConfig.selectedServerEmojis.length} 个表情`);
+                          `已保存表情: ${serverConfig.selectedServerEmojis.length} 个\n` +
+                          `临时选择表情: ${serverConfig.tempSelectedEmojis.length} 个`);
 
         const selectMenu = new StringSelectMenuBuilder()
             .setCustomId('emoji_selection_menu')
@@ -2067,16 +2118,14 @@ class BochiBot {
         const channelId = interaction.channel.id;
         const channelName = interaction.channel.name;
         
-        // 获取有效设置（频道设置优先，否则使用全局设置）
-        const channelSettings = this.config.botSettings.channelSettings[channelId];
-        const effectiveAutoReaction = channelSettings && channelSettings.hasOwnProperty('autoReaction') 
-            ? channelSettings.autoReaction 
-            : this.config.botSettings.autoReaction;
-        const effectiveAiComment = channelSettings && channelSettings.hasOwnProperty('aiComment') 
-            ? channelSettings.aiComment 
-            : this.config.botSettings.aiComment;
+        // 获取有效设置（使用新的层级系统：频道设置 > 服务器设置 > 全局设置）
+        const guildId = interaction.guild?.id;
+        const effectiveAutoReaction = this.getServerSetting(guildId, 'autoReaction', channelId);
+        const effectiveAiComment = this.getServerSetting(guildId, 'aiComment', channelId);
         
         // 判断是否有独立设置
+        const serverConfig = guildId ? this.getServerConfig(guildId) : null;
+        const channelSettings = serverConfig ? serverConfig.channelSettings[channelId] : null;
         const hasIndependentSettings = channelSettings && 
             (channelSettings.hasOwnProperty('autoReaction') || channelSettings.hasOwnProperty('aiComment'));
         
