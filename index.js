@@ -25,7 +25,8 @@ class BochiBot {
                 autoReaction: false,
                 aiComment: false,
                 reactionEmojis: ['👍', '❤️', '🎨', '✨', '🔥'],
-                allowedRoles: [], // 全局权限角色（向后兼容）
+                allowedRoles: [], // 允许的角色ID列表
+                allowedUsers: [], // 允许的用户ID列表
                 allowedChannels: [], // 允许使用机器人命令的频道ID列表（空表示所有频道）
                 aiPrompt: '请用中文对这张图片进行简短的正面点评，语气要友好温馨。点评要真诚且具体，不要过于夸张。请控制在50字以内。', 
                 channelSettings: {}, // 按频道存储不同的设置 {channelId: {autoReaction: bool, aiComment: bool, ...}}
@@ -697,6 +698,15 @@ class BochiBot {
                     await this.showPermissionSettings(interaction);
                 }
                 break;
+            case 'add_user_permission':
+                await this.showAddUserModal(interaction);
+                break;
+            case 'remove_user_permission':
+                await this.showRemoveUserModal(interaction);
+                break;
+            case 'list_all_users':
+                await this.showAllAuthorizedUsers(interaction);
+                break;
         }
         
         // 处理频道特定的按钮（动态ID）
@@ -723,6 +733,106 @@ class BochiBot {
                 !this.config.botSettings.channelSettings[channelId].aiComment;
             await this.showChannelSettings(interaction);
         }
+    }
+
+    async showAddUserModal(interaction) {
+        const modal = new ModalBuilder()
+            .setCustomId('add_user_modal')
+            .setTitle('添加用户权限');
+
+        const userIdInput = new TextInputBuilder()
+            .setCustomId('user_id_input')
+            .setLabel('用户ID')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('请输入用户的Discord ID (例如: 123456789012345678)')
+            .setRequired(true);
+
+        const userReasonInput = new TextInputBuilder()
+            .setCustomId('user_reason_input')
+            .setLabel('添加原因 (可选)')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('例如: 临时管理员、协助者等')
+            .setRequired(false);
+
+        const firstActionRow = new ActionRowBuilder().addComponents(userIdInput);
+        const secondActionRow = new ActionRowBuilder().addComponents(userReasonInput);
+
+        modal.addComponents(firstActionRow, secondActionRow);
+        await interaction.showModal(modal);
+    }
+
+    async showRemoveUserModal(interaction) {
+        const modal = new ModalBuilder()
+            .setCustomId('remove_user_modal')
+            .setTitle('移除用户权限');
+
+        const userIdInput = new TextInputBuilder()
+            .setCustomId('remove_user_id_input')
+            .setLabel('用户ID')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('请输入要移除权限的用户Discord ID')
+            .setRequired(true);
+
+        const firstActionRow = new ActionRowBuilder().addComponents(userIdInput);
+        modal.addComponents(firstActionRow);
+        await interaction.showModal(modal);
+    }
+
+    async showAllAuthorizedUsers(interaction) {
+        const guild = interaction.guild;
+        if (!guild) {
+            await interaction.reply({
+                content: '❌ 无法获取服务器信息。',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        const allowedUsers = this.config.botSettings.allowedUsers;
+        
+        if (allowedUsers.length === 0) {
+            await interaction.reply({
+                content: '📋 **当前没有单独授权的用户**\n\n所有管理权限均通过角色管理。',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        const userInfoList = await Promise.all(
+            allowedUsers.map(async (userId) => {
+                try {
+                    const member = guild.members.cache.get(userId) || await guild.members.fetch(userId);
+                    return `👤 **${member.user.username}** (${member.user.tag})\n   └ ID: \`${userId}\``;
+                } catch (error) {
+                    return `❓ **未知用户**\n   └ ID: \`${userId}\` (用户可能已离开服务器)`;
+                }
+            })
+        );
+
+        const embed = new EmbedBuilder()
+            .setColor('#FFB6C1')
+            .setTitle('👥 已授权用户列表')
+            .setDescription(userInfoList.join('\n\n'))
+            .addFields(
+                { name: '📊 统计', value: `共 ${allowedUsers.length} 个用户`, inline: true },
+                { name: '💡 提示', value: '使用"移除用户权限"按钮来撤销用户的管理权限', inline: true }
+            )
+            .setTimestamp();
+
+        const backButton = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('permission_settings')
+                    .setLabel('返回权限设置')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('🔙')
+            );
+
+        await interaction.reply({
+            embeds: [embed],
+            components: [backButton],
+            flags: MessageFlags.Ephemeral
+        });
     }
 
     async showBotSettings(interaction) {
@@ -865,15 +975,41 @@ class BochiBot {
         }
 
         const serverConfig = this.getServerConfig(guild.id);
+        
+        // 获取允许的角色信息
         const allowedRoles = this.config.botSettings.allowedRoles
-            .map(roleId => guild.roles.cache.get(roleId)?.name || '未知角色')
-            .join(', ') || '无';
+            .map(roleId => {
+                const role = guild.roles.cache.get(roleId);
+                return role ? `${role.name}` : '未知角色';
+            })
+            .join('、') || '无';
 
-        // 获取所有可选择的角色并缓存
+        // 获取允许的用户信息
+        const allowedUsers = this.config.botSettings.allowedUsers
+            .map(userId => {
+                const member = guild.members.cache.get(userId);
+                return member ? `${member.user.username}` : `用户ID:${userId}`;
+            })
+            .slice(0, 10) // 最多显示10个用户
+            .join('、') || '无';
+        
+        const userCountText = this.config.botSettings.allowedUsers.length > 10 
+            ? `${allowedUsers}等${this.config.botSettings.allowedUsers.length}人` 
+            : allowedUsers;
+
+        // 获取所有可选择的角色并缓存（确保"BOT维护员"角色默认在选择状态）
         const allRoles = guild.roles.cache
             .filter(role => !role.managed && role.id !== guild.id)
-            .sort((a, b) => b.position - a.position) // 按权限位置排序
+            .sort((a, b) => b.position - a.position)
             .map(role => role);
+
+        // 确保BOT维护员角色默认被选中
+        const botMaintainerRole = allRoles.find(role => 
+            role.name === 'BOT维护员' || role.name.includes('维护员') || role.name.includes('BOT')
+        );
+        if (botMaintainerRole && !this.config.botSettings.allowedRoles.includes(botMaintainerRole.id)) {
+            this.config.botSettings.allowedRoles.push(botMaintainerRole.id);
+        }
 
         if (serverConfig.rolesCache.length === 0 && allRoles.length > 0) {
             serverConfig.rolesCache = allRoles;
@@ -892,16 +1028,39 @@ class BochiBot {
             .setTitle('🔒 权限设置')
             .addFields(
                 { name: '👥 允许的角色', value: allowedRoles, inline: false },
+                { name: '👤 允许的用户', value: userCountText, inline: false },
                 { name: '📊 角色信息', value: `总角色数: ${serverConfig.rolesCache.length}\n当前页面: ${pageIndex + 1}/${totalPages} (显示 ${startIndex + 1}-${endIndex})`, inline: false },
-                { name: '💡 说明', value: '只有拥有指定角色的用户才能使用机器人配置功能', inline: false }
+                { name: '💡 说明', value: '拥有指定角色的用户或被单独授权的用户可以使用机器人配置功能', inline: false }
             );
 
         const components = [];
 
+        // 用户管理按钮行
+        const userManagementRow = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('add_user_permission')
+                    .setLabel('添加用户权限')
+                    .setStyle(ButtonStyle.Success)
+                    .setEmoji('👤'),
+                new ButtonBuilder()
+                    .setCustomId('remove_user_permission')
+                    .setLabel('移除用户权限')
+                    .setStyle(ButtonStyle.Danger)
+                    .setEmoji('🗑️'),
+                new ButtonBuilder()
+                    .setCustomId('list_all_users')
+                    .setLabel('查看所有授权用户')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('📋')
+            );
+        components.push(userManagementRow);
+
+        // 角色选择菜单
         if (currentPageRoles.length > 0) {
             const selectMenu = new StringSelectMenuBuilder()
                 .setCustomId('select_allowed_roles')
-                .setPlaceholder('选择允许的角色')
+                .setPlaceholder('选择允许的角色（可多选）')
                 .setMaxValues(Math.min(currentPageRoles.length, 10))
                 .addOptions(currentPageRoles.map(role => ({
                     label: role.name,
@@ -1246,6 +1405,111 @@ class BochiBot {
                     content: '✅ AI提示词已更新！',
                     flags: MessageFlags.Ephemeral
                 });
+                break;
+
+            case 'add_user_modal':
+                const userId = interaction.fields.getTextInputValue('user_id_input').trim();
+                const reason = interaction.fields.getTextInputValue('user_reason_input') || '未提供原因';
+                
+                // 验证用户ID格式
+                if (!/^\d{17,19}$/.test(userId)) {
+                    await interaction.reply({
+                        content: '❌ 无效的用户ID格式！用户ID应该是17-19位数字。',
+                        flags: MessageFlags.Ephemeral
+                    });
+                    break;
+                }
+
+                // 检查用户是否已存在
+                if (this.config.botSettings.allowedUsers.includes(userId)) {
+                    await interaction.reply({
+                        content: '⚠️ 该用户已经拥有管理权限！',
+                        flags: MessageFlags.Ephemeral
+                    });
+                    break;
+                }
+
+                // 尝试获取用户信息
+                try {
+                    const guild = interaction.guild;
+                    const member = guild.members.cache.get(userId) || await guild.members.fetch(userId);
+                    
+                    // 添加用户到允许列表
+                    this.config.botSettings.allowedUsers.push(userId);
+                    
+                    const embed = new EmbedBuilder()
+                        .setColor('#00FF00')
+                        .setTitle('✅ 用户权限添加成功')
+                        .addFields(
+                            { name: '👤 用户', value: `${member.user.username} (${member.user.tag})`, inline: true },
+                            { name: '🆔 用户ID', value: `\`${userId}\``, inline: true },
+                            { name: '📝 添加原因', value: reason, inline: false },
+                            { name: '⏰ 添加时间', value: new Date().toLocaleString('zh-CN'), inline: true }
+                        );
+
+                    await interaction.reply({
+                        embeds: [embed],
+                        flags: MessageFlags.Ephemeral
+                    });
+
+                    console.log(`✅ 已添加用户 ${member.user.username} (${userId}) 到管理员列表`);
+                } catch (error) {
+                    // 用户不在服务器中，但仍然添加到列表
+                    this.config.botSettings.allowedUsers.push(userId);
+                    
+                    await interaction.reply({
+                        content: `✅ **用户权限添加成功**\n\n👤 **用户ID**: \`${userId}\`\n📝 **添加原因**: ${reason}\n\n⚠️ 注意：无法获取用户信息，该用户可能不在此服务器中，但权限已成功添加。`,
+                        flags: MessageFlags.Ephemeral
+                    });
+
+                    console.log(`✅ 已添加用户ID ${userId} 到管理员列表（用户不在服务器中）`);
+                }
+                break;
+
+            case 'remove_user_modal':
+                const removeUserId = interaction.fields.getTextInputValue('remove_user_id_input').trim();
+                
+                // 验证用户ID格式
+                if (!/^\d{17,19}$/.test(removeUserId)) {
+                    await interaction.reply({
+                        content: '❌ 无效的用户ID格式！用户ID应该是17-19位数字。',
+                        flags: MessageFlags.Ephemeral
+                    });
+                    break;
+                }
+
+                // 检查用户是否在允许列表中
+                const userIndex = this.config.botSettings.allowedUsers.indexOf(removeUserId);
+                if (userIndex === -1) {
+                    await interaction.reply({
+                        content: '⚠️ 该用户不在管理权限列表中！',
+                        flags: MessageFlags.Ephemeral
+                    });
+                    break;
+                }
+
+                // 移除用户
+                this.config.botSettings.allowedUsers.splice(userIndex, 1);
+                
+                // 尝试获取用户信息以显示
+                try {
+                    const guild = interaction.guild;
+                    const member = guild.members.cache.get(removeUserId) || await guild.members.fetch(removeUserId);
+                    
+                    await interaction.reply({
+                        content: `✅ **用户权限移除成功**\n\n👤 **用户**: ${member.user.username} (${member.user.tag})\n🆔 **用户ID**: \`${removeUserId}\`\n⏰ **移除时间**: ${new Date().toLocaleString('zh-CN')}`,
+                        flags: MessageFlags.Ephemeral
+                    });
+
+                    console.log(`✅ 已从管理员列表移除用户 ${member.user.username} (${removeUserId})`);
+                } catch (error) {
+                    await interaction.reply({
+                        content: `✅ **用户权限移除成功**\n\n🆔 **用户ID**: \`${removeUserId}\`\n⏰ **移除时间**: ${new Date().toLocaleString('zh-CN')}`,
+                        flags: MessageFlags.Ephemeral
+                    });
+
+                    console.log(`✅ 已从管理员列表移除用户ID ${removeUserId}`);
+                }
                 break;
         }
     }
@@ -1991,9 +2255,14 @@ class BochiBot {
         }
         
         // 检查用户是否拥有手动添加的指定角色
-        return this.config.botSettings.allowedRoles.some(roleId => 
+        const hasAllowedRole = this.config.botSettings.allowedRoles.some(roleId => 
             member.roles.cache.has(roleId)
         );
+        
+        // 检查用户是否在允许的用户列表中
+        const isAllowedUser = this.config.botSettings.allowedUsers.includes(member.id);
+        
+        return hasAllowedRole || isAllowedUser;
     }
     
     // 检查普通用户是否可以在当前频道使用命令
