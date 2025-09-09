@@ -1254,14 +1254,6 @@ class BochiBot {
         const channelId = message.channel.id;
         const channelName = message.channel.name;
         
-        // 初始化频道设置（如果不存在）
-        if (!this.config.botSettings.channelSettings[channelId]) {
-            this.config.botSettings.channelSettings[channelId] = {
-                autoReaction: this.config.botSettings.autoReaction,
-                aiComment: this.config.botSettings.aiComment
-            };
-        }
-        
         // 初始化频道统计（如果不存在）
         if (!this.config.botSettings.channelStats[channelId]) {
             this.config.botSettings.channelStats[channelId] = {
@@ -1271,11 +1263,14 @@ class BochiBot {
             };
         }
         
-        // 使用频道特定设置
+        // 获取有效的反应设置：频道设置优先，否则使用全局设置
         const channelSettings = this.config.botSettings.channelSettings[channelId];
+        const shouldReact = channelSettings && channelSettings.hasOwnProperty('autoReaction') 
+            ? channelSettings.autoReaction 
+            : this.config.botSettings.autoReaction;
         
         // 自动反应功能
-        if (channelSettings.autoReaction) {
+        if (shouldReact) {
             // 获取服务器特定的表情配置
             const guildId = message.guild?.id;
             const serverEmojis = guildId ? this.getServerEmojisForReaction(guildId) : this.config.botSettings.reactionEmojis;
@@ -1328,8 +1323,13 @@ class BochiBot {
         const channelId = message.channel.id;
         const channelSettings = this.config.botSettings.channelSettings[channelId];
         
+        // 获取有效的AI点评设置：频道设置优先，否则使用全局设置
+        const shouldComment = channelSettings && channelSettings.hasOwnProperty('aiComment') 
+            ? channelSettings.aiComment 
+            : this.config.botSettings.aiComment;
+        
         // 检查是否开启AI点评且配置了API
-        if (!channelSettings.aiComment) {
+        if (!shouldComment) {
             return;
         }
         
@@ -1803,23 +1803,26 @@ class BochiBot {
         const channelId = interaction.channel.id;
         const channelName = interaction.channel.name;
         
-        // 初始化频道设置（如果不存在）
-        if (!this.config.botSettings.channelSettings[channelId]) {
-            this.config.botSettings.channelSettings[channelId] = {
-                autoReaction: this.config.botSettings.autoReaction,
-                aiComment: this.config.botSettings.aiComment
-            };
-        }
-        
+        // 获取有效设置（频道设置优先，否则使用全局设置）
         const channelSettings = this.config.botSettings.channelSettings[channelId];
+        const effectiveAutoReaction = channelSettings && channelSettings.hasOwnProperty('autoReaction') 
+            ? channelSettings.autoReaction 
+            : this.config.botSettings.autoReaction;
+        const effectiveAiComment = channelSettings && channelSettings.hasOwnProperty('aiComment') 
+            ? channelSettings.aiComment 
+            : this.config.botSettings.aiComment;
+        
+        // 判断是否有独立设置
+        const hasIndependentSettings = channelSettings && 
+            (channelSettings.hasOwnProperty('autoReaction') || channelSettings.hasOwnProperty('aiComment'));
         
         const embed = new EmbedBuilder()
             .setColor('#FFB6C1')
             .setTitle('📺 频道设置')
-            .setDescription(`当前频道: #${channelName}`)
+            .setDescription(`当前频道: #${channelName}${hasIndependentSettings ? '\n🔧 此频道有独立设置' : '\n📋 此频道使用全局设置'}`)
             .addFields(
-                { name: '🎨 图片反应', value: channelSettings.autoReaction ? '✅ 开启' : '❌ 关闭', inline: true },
-                { name: '💬 AI点评', value: channelSettings.aiComment ? '✅ 开启' : '❌ 关闭', inline: true },
+                { name: '🎨 图片反应', value: effectiveAutoReaction ? '✅ 开启' : '❌ 关闭', inline: true },
+                { name: '💬 AI点评', value: effectiveAiComment ? '✅ 开启' : '❌ 关闭', inline: true },
                 { name: '📊 反应统计', value: this.config.botSettings.channelStats[channelId]?.reactionCount?.toString() || '0', inline: true }
             );
 
@@ -1827,12 +1830,12 @@ class BochiBot {
             .addComponents(
                 new ButtonBuilder()
                     .setCustomId(`toggle_channel_reaction_${channelId}`)
-                    .setLabel(channelSettings.autoReaction ? '关闭反应' : '开启反应')
-                    .setStyle(channelSettings.autoReaction ? ButtonStyle.Danger : ButtonStyle.Success),
+                    .setLabel(effectiveAutoReaction ? '关闭反应' : '开启反应')
+                    .setStyle(effectiveAutoReaction ? ButtonStyle.Danger : ButtonStyle.Success),
                 new ButtonBuilder()
                     .setCustomId(`toggle_channel_comment_${channelId}`)
-                    .setLabel(channelSettings.aiComment ? '关闭点评' : '开启点评')
-                    .setStyle(channelSettings.aiComment ? ButtonStyle.Danger : ButtonStyle.Success)
+                    .setLabel(effectiveAiComment ? '关闭点评' : '开启点评')
+                    .setStyle(effectiveAiComment ? ButtonStyle.Danger : ButtonStyle.Success)
             );
 
         await interaction.reply({
