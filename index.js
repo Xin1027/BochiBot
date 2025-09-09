@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Collection, Events, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, InteractionResponseType, MessageFlags } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, Events, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, InteractionResponseType, MessageFlags, PermissionFlagsBits } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const axios = require('axios');
 require('dotenv').config();
@@ -2542,22 +2542,22 @@ class BochiBot {
     }
 
     async registerSlashCommands() {
-        // 管理员专用命令（只有管理员可以看到和使用）
+        // 管理员专用命令（只有具有"管理服务器"权限的用户可以看到和使用）
         const adminCommands = [
             {
                 name: 'bochi',
-                description: '打开波奇机器人配置面板'
-                // 移除 default_member_permissions，让所有用户都能看到命令，由机器人内部权限系统控制使用权限
+                description: '打开波奇机器人配置面板',
+                default_member_permissions: PermissionFlagsBits.ManageGuild.toString()
             },
             {
                 name: '频道设置',
-                description: '设置当前频道的波奇机器人配置'
-                // 移除 default_member_permissions，让所有用户都能看到命令，由机器人内部权限系统控制使用权限
+                description: '设置当前频道的波奇机器人配置',
+                default_member_permissions: PermissionFlagsBits.ManageGuild.toString()
             },
             {
                 name: '频道统计',
-                description: '查看所有频道的反应统计信息'
-                // 移除 default_member_permissions，让所有用户都能看到命令，由机器人内部权限系统控制使用权限
+                description: '查看所有频道的反应统计信息',
+                default_member_permissions: PermissionFlagsBits.ManageGuild.toString()
             }
         ];
         
