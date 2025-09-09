@@ -2237,6 +2237,17 @@ class BochiBot {
         console.log(`🔍 权限检查 - 用户: ${member.user.username} (${member.id})`);
         console.log(`👥 用户的所有角色: [${userRoles.join(', ')}]`);
         
+        // 检查是否是全局管理员（优先级最高，跨所有服务器有效）
+        const globalAdminId = process.env.BOCHI_GLOBAL_ADMIN_ID;
+        if (globalAdminId && member.id === globalAdminId) {
+            console.log(`🌟 权限通过: 用户是全局管理员 (跨服务器权限)`);
+            return true;
+        } else if (globalAdminId) {
+            console.log(`🔍 全局管理员检查: 当前用户 ${member.id} != 全局管理员 ${globalAdminId}`);
+        } else {
+            console.log(`⚠️  未设置全局管理员环境变量 BOCHI_GLOBAL_ADMIN_ID`);
+        }
+        
         // 检查是否是服务器主（拥有者）
         if (member.guild.ownerId === member.id) {
             console.log(`✅ 权限通过: 用户是服务器主`);
