@@ -2865,20 +2865,20 @@ class BochiBot {
         const adminCommands = [
             {
                 name: 'bochi',
-                description: '打开波奇机器人配置面板'
-                // 移除所有Discord权限限制，让所有用户都能看到命令
-                // 真正的权限控制在代码中的checkPermission()函数进行
-                // 这样确保全局管理员在任何服务器都能看到和使用命令
+                description: '打开波奇机器人配置面板',
+                default_member_permissions: PermissionFlagsBits.ManageMessages.toString()
+                // 使用"管理消息"权限来过滤普通用户
+                // 对于全局管理员，我们会在代码中特别处理权限检查
             },
             {
                 name: '频道设置',
-                description: '设置当前频道的波奇机器人配置'
-                // 移除所有Discord权限限制，通过代码进行权限检查
+                description: '设置当前频道的波奇机器人配置',
+                default_member_permissions: PermissionFlagsBits.ManageMessages.toString()
             },
             {
                 name: '频道统计',
-                description: '查看所有频道的反应统计信息'
-                // 移除所有Discord权限限制，通过代码进行权限检查
+                description: '查看所有频道的反应统计信息',
+                default_member_permissions: PermissionFlagsBits.ManageMessages.toString()
             }
         ];
         
@@ -2924,10 +2924,31 @@ class BochiBot {
                     // 等待片刻
                     await new Promise(resolve => setTimeout(resolve, 500));
                     
-                    // 注册所有命令
+                    // 检查是否有全局管理员在此服务器，如果有且没有管理权限，需要特殊处理
+                    const globalAdminId = process.env.BOCHI_GLOBAL_ADMIN_ID;
+                    let needsSpecialHandling = false;
+                    
+                    if (globalAdminId) {
+                        try {
+                            const globalAdminMember = await guild.members.fetch(globalAdminId);
+                            const hasManageMessages = globalAdminMember.permissions.has(PermissionFlagsBits.ManageMessages);
+                            if (!hasManageMessages) {
+                                needsSpecialHandling = true;
+                                console.log(`🔧 全局管理员在服务器 "${guild.name}" 没有管理消息权限，启用特殊处理`);
+                            }
+                        } catch (error) {
+                            // 全局管理员不在此服务器中，正常处理
+                        }
+                    }
+                    
+                    // 注册命令，如果需要特殊处理，暂时移除权限要求
+                    const commandsToRegister = needsSpecialHandling ? 
+                        [...adminCommands.map(cmd => ({...cmd, default_member_permissions: undefined})), ...userCommands] :
+                        [...adminCommands, ...userCommands];
+                    
                     await rest.put(
                         Routes.applicationGuildCommands(this.client.user.id, guildId),
-                        { body: [...adminCommands, ...userCommands] }
+                        { body: commandsToRegister }
                     );
                     console.log(`✅ 在服务器 "${guild.name}" 中注册成功 (管理命令: ${adminCommands.length}, 用户命令: ${userCommands.length})`);
                 } catch (guildError) {
