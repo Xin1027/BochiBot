@@ -2239,14 +2239,9 @@ class BochiBot {
         
         // 检查是否是全局管理员（优先级最高，跨所有服务器有效）
         const globalAdminId = process.env.BOCHI_GLOBAL_ADMIN_ID;
-        console.log(`🔍 全局管理员检查 - 环境变量: ${globalAdminId}, 当前用户ID: ${member.id}, 类型比较: ${typeof globalAdminId} vs ${typeof member.id}`);
         if (globalAdminId && member.id === globalAdminId) {
             console.log(`🌟 权限通过: 用户是全局管理员 (跨服务器权限)`);
             return true;
-        } else if (globalAdminId) {
-            console.log(`🔍 全局管理员检查失败: 当前用户 ${member.id} != 全局管理员 ${globalAdminId} (严格相等: ${member.id === globalAdminId})`);
-        } else {
-            console.log(`⚠️  未设置全局管理员环境变量 BOCHI_GLOBAL_ADMIN_ID`);
         }
         
         // 检查是否是服务器主（拥有者）
@@ -2870,21 +2865,20 @@ class BochiBot {
         const adminCommands = [
             {
                 name: 'bochi',
-                description: '打开波奇机器人配置面板'
-                // 移除default_member_permissions，让所有用户都能看到命令
-                // 权限检查通过代码中的checkPermission()函数进行
+                description: '打开波奇机器人配置面板',
+                default_member_permissions: PermissionFlagsBits.ManageMessages.toString()
+                // 使用"管理消息"权限，让版主及以上级别的用户能看到命令
+                // 比"管理服务器"权限要求更低，但仍能过滤普通用户
             },
             {
                 name: '频道设置',
-                description: '设置当前频道的波奇机器人配置'
-                // 移除default_member_permissions，让所有用户都能看到命令
-                // 权限检查通过代码中的checkPermission()函数进行
+                description: '设置当前频道的波奇机器人配置',
+                default_member_permissions: PermissionFlagsBits.ManageMessages.toString()
             },
             {
                 name: '频道统计',
-                description: '查看所有频道的反应统计信息'
-                // 移除default_member_permissions，让所有用户都能看到命令  
-                // 权限检查通过代码中的checkPermission()函数进行
+                description: '查看所有频道的反应统计信息',
+                default_member_permissions: PermissionFlagsBits.ManageMessages.toString()
             }
         ];
         
