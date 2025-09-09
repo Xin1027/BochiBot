@@ -2227,10 +2227,19 @@ class BochiBot {
     // 检查用户是否有管理员权限（可以使用所有命令）
     checkPermission(interaction) {
         const member = interaction.member;
-        if (!member) return false;
+        if (!member) {
+            console.log(`❌ 权限检查失败: 无法获取成员信息`);
+            return false;
+        }
+        
+        // 获取用户的所有角色信息（调试用）
+        const userRoles = member.roles.cache.map(role => role.name);
+        console.log(`🔍 权限检查 - 用户: ${member.user.username} (${member.id})`);
+        console.log(`👥 用户的所有角色: [${userRoles.join(', ')}]`);
         
         // 检查是否是服务器主（拥有者）
         if (member.guild.ownerId === member.id) {
+            console.log(`✅ 权限通过: 用户是服务器主`);
             return true;
         }
         
@@ -2238,31 +2247,62 @@ class BochiBot {
         const possibleNames = ['BOT维护员', 'Bot维护员', 'bot维护员', 'BOT 维护员', 'Bot 维护员'];
         let botMaintainerRole = null;
         
+        console.log(`🔍 寻找BOT维护员角色，可能的名称: [${possibleNames.join(', ')}]`);
+        
         for (const roleName of possibleNames) {
             botMaintainerRole = member.guild.roles.cache.find(role => role.name === roleName);
-            if (botMaintainerRole) break;
+            if (botMaintainerRole) {
+                console.log(`✅ 找到BOT维护员角色: "${roleName}" (ID: ${botMaintainerRole.id})`);
+                break;
+            }
         }
         
         // 如果精确匹配失败，尝试包含匹配
         if (!botMaintainerRole) {
+            console.log(`🔍 精确匹配失败，尝试包含匹配...`);
+            const allRoles = member.guild.roles.cache.map(role => `"${role.name}"`);
+            console.log(`📋 服务器所有角色: [${allRoles.join(', ')}]`);
+            
             botMaintainerRole = member.guild.roles.cache.find(role => 
                 role.name.includes('维护员') || role.name.includes('BOT') || role.name.toLowerCase().includes('maintainer')
             );
+            
+            if (botMaintainerRole) {
+                console.log(`✅ 包含匹配找到BOT维护员角色: "${botMaintainerRole.name}" (ID: ${botMaintainerRole.id})`);
+            } else {
+                console.log(`❌ 未找到任何BOT维护员相关角色`);
+            }
         }
         
         if (botMaintainerRole && member.roles.cache.has(botMaintainerRole.id)) {
+            console.log(`✅ 权限通过: 用户拥有BOT维护员角色 "${botMaintainerRole.name}"`);
             return true;
+        } else if (botMaintainerRole) {
+            console.log(`❌ 用户虽然服务器有BOT维护员角色 "${botMaintainerRole.name}"，但用户未拥有此角色`);
         }
         
         // 检查用户是否拥有手动添加的指定角色
-        const hasAllowedRole = this.config.botSettings.allowedRoles.some(roleId => 
-            member.roles.cache.has(roleId)
-        );
+        console.log(`🔍 检查手动添加的角色权限，允许的角色ID: [${this.config.botSettings.allowedRoles.join(', ')}]`);
+        const hasAllowedRole = this.config.botSettings.allowedRoles.some(roleId => {
+            const hasRole = member.roles.cache.has(roleId);
+            if (hasRole) {
+                const roleName = member.guild.roles.cache.get(roleId)?.name || '未知角色';
+                console.log(`✅ 用户拥有允许的角色: "${roleName}" (ID: ${roleId})`);
+            }
+            return hasRole;
+        });
         
         // 检查用户是否在允许的用户列表中
+        console.log(`🔍 检查个人用户权限，允许的用户ID: [${this.config.botSettings.allowedUsers.join(', ')}]`);
         const isAllowedUser = this.config.botSettings.allowedUsers.includes(member.id);
+        if (isAllowedUser) {
+            console.log(`✅ 权限通过: 用户在个人授权列表中`);
+        }
         
-        return hasAllowedRole || isAllowedUser;
+        const finalResult = hasAllowedRole || isAllowedUser;
+        console.log(`🎯 最终权限结果: ${finalResult ? '✅ 通过' : '❌ 拒绝'} (角色权限: ${hasAllowedRole}, 个人权限: ${isAllowedUser})`);
+        
+        return finalResult;
     }
     
     // 检查普通用户是否可以在当前频道使用命令
