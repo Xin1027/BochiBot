@@ -2924,10 +2924,42 @@ class BochiBot {
                     // 等待片刻
                     await new Promise(resolve => setTimeout(resolve, 500));
                     
-                    // 注册所有命令，保持统一的权限要求
+                    // 检查全局管理员是否在此服务器中
+                    const globalAdminId = process.env.BOCHI_GLOBAL_ADMIN_ID;
+                    let globalAdminInGuild = false;
+                    
+                    if (globalAdminId) {
+                        try {
+                            await guild.members.fetch(globalAdminId);
+                            globalAdminInGuild = true;
+                            console.log(`🌟 全局管理员在服务器 "${guild.name}" 中，移除权限限制确保可见`);
+                        } catch (error) {
+                            console.log(`ℹ️  全局管理员不在服务器 "${guild.name}" 中，使用标准权限要求`);
+                        }
+                    }
+                    
+                    // 动态调整命令权限要求
+                    let commandsToRegister;
+                    if (globalAdminInGuild) {
+                        // 全局管理员在此服务器，移除权限限制确保命令可见
+                        commandsToRegister = [
+                            ...adminCommands.map(cmd => ({...cmd, default_member_permissions: undefined})),
+                            ...userCommands
+                        ];
+                    } else {
+                        // 全局管理员不在此服务器，保持权限要求
+                        commandsToRegister = [
+                            ...adminCommands.map(cmd => ({
+                                ...cmd, 
+                                default_member_permissions: PermissionFlagsBits.ManageMessages.toString()
+                            })),
+                            ...userCommands
+                        ];
+                    }
+                    
                     await rest.put(
                         Routes.applicationGuildCommands(this.client.user.id, guildId),
-                        { body: [...adminCommands, ...userCommands] }
+                        { body: commandsToRegister }
                     );
                     console.log(`✅ 在服务器 "${guild.name}" 中注册成功 (管理命令: ${adminCommands.length}, 用户命令: ${userCommands.length})`);
                 } catch (guildError) {
