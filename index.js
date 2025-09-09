@@ -22,8 +22,8 @@ class BochiBot {
 
         this.config = {
             botSettings: {
-                autoReaction: false,
-                aiComment: false,
+                autoReaction: true,
+                aiComment: true,
                 reactionEmojis: ['👍', '❤️', '🎨', '✨', '🔥'],
                 allowedRoles: [], // 允许的角色ID列表
                 allowedUsers: [], // 允许的用户ID列表
@@ -2239,11 +2239,12 @@ class BochiBot {
         
         // 检查是否是全局管理员（优先级最高，跨所有服务器有效）
         const globalAdminId = process.env.BOCHI_GLOBAL_ADMIN_ID;
+        console.log(`🔍 全局管理员检查 - 环境变量: ${globalAdminId}, 当前用户ID: ${member.id}, 类型比较: ${typeof globalAdminId} vs ${typeof member.id}`);
         if (globalAdminId && member.id === globalAdminId) {
             console.log(`🌟 权限通过: 用户是全局管理员 (跨服务器权限)`);
             return true;
         } else if (globalAdminId) {
-            console.log(`🔍 全局管理员检查: 当前用户 ${member.id} != 全局管理员 ${globalAdminId}`);
+            console.log(`🔍 全局管理员检查失败: 当前用户 ${member.id} != 全局管理员 ${globalAdminId} (严格相等: ${member.id === globalAdminId})`);
         } else {
             console.log(`⚠️  未设置全局管理员环境变量 BOCHI_GLOBAL_ADMIN_ID`);
         }
