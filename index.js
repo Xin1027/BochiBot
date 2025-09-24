@@ -1702,30 +1702,42 @@ class BochiBot {
 
     async getGeminiImageComment(imageUrl) {
         try {
+            console.log('🔄 使用传统下载方式处理图片（更稳定）');
+            
             // 轮询使用API密钥
             const currentApiKey = this.config.apiSettings.geminiApiKeys[this.config.apiSettings.geminiCurrentIndex];
             this.config.apiSettings.geminiCurrentIndex = 
                 (this.config.apiSettings.geminiCurrentIndex + 1) % this.config.apiSettings.geminiApiKeys.length;
-
+            
             const genAI = new GoogleGenerativeAI(currentApiKey);
-            const model = genAI.getGenerativeModel({ 
-                model: this.config.apiSettings.geminiModel,
-                tools: [{ urlContext: {} }]  // 启用URL Context工具
+            const model = genAI.getGenerativeModel({ model: this.config.apiSettings.geminiModel });
+
+            // 下载图片
+            const response = await axios.get(imageUrl, { 
+                responseType: 'arraybuffer',
+                timeout: 30000, // 30秒超时
+                headers: {
+                    'User-Agent': 'DiscordBot (https://discord.com)'
+                }
             });
+            const imageData = Buffer.from(response.data).toString('base64');
 
             const prompt = this.config.botSettings.aiPrompt;
 
-            // 使用URL Context Tool直接处理图片URL，无需下载
             const result = await model.generateContent([
-                `${prompt}\n\n请分析这张图片: ${imageUrl}`
+                prompt,
+                {
+                    inlineData: {
+                        data: imageData,
+                        mimeType: response.headers['content-type'] || 'image/jpeg'
+                    }
+                }
             ]);
 
-            console.log('🔄 使用URL Context Tool，零下载流量处理图片');
             return result.response.text();
         } catch (error) {
-            console.error('Gemini URL Context调用失败，尝试回退到传统方式:', error);
-            // 如果URL Context失败，回退到传统的下载方式
-            return await this.getGeminiImageCommentFallback(imageUrl);
+            console.error('Gemini 图片处理失败:', error);
+            return null;
         }
     }
 
