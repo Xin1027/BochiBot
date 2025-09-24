@@ -47,7 +47,9 @@ class BochiBot {
                 availableModels: {
                     gemini: [],
                     openai: []
-                }
+                },
+                // 图片处理模式: url(仅URL,省流量), download(仅下载,稳定), smart(智能,推荐), urlonly(仅URL,失败跳过)
+                imageProcessingMode: 'smart'
             }
         };
 
@@ -561,6 +563,9 @@ class BochiBot {
             case 'get_models':
                 await this.fetchAvailableModels(interaction);
                 break;
+            case 'image_processing_config':
+                await this.showImageProcessingInfo(interaction);
+                break;
             case 'confirm_emoji_selection':
                 const guild = interaction.guild;
                 if (!guild) {
@@ -960,6 +965,13 @@ class BochiBot {
     }
 
     async showApiSettings(interaction) {
+        const modeNames = {
+            'url': 'URL模式（省流量）',
+            'download': '下载模式（稳定）',
+            'smart': '智能模式（推荐）',
+            'urlonly': '仅URL模式（最省流量）'
+        };
+        
         const embed = new EmbedBuilder()
             .setColor('#FFB6C1')
             .setTitle('🔧 API设置')
@@ -967,7 +979,8 @@ class BochiBot {
                 { name: '🤖 当前AI服务', value: this.config.apiSettings.useGemini ? 'Gemini' : 'OpenAI', inline: true },
                 { name: '📡 Gemini API数量', value: this.config.apiSettings.geminiApiKeys.length.toString(), inline: true },
                 { name: '🔗 OpenAI配置', value: this.config.apiSettings.openaiApiKey ? '已配置' : '未配置', inline: true },
-                { name: '🎯 当前模型', value: this.config.apiSettings.useGemini ? this.config.apiSettings.geminiModel : this.config.apiSettings.openaiModel, inline: false }
+                { name: '🎯 当前模型', value: this.config.apiSettings.useGemini ? this.config.apiSettings.geminiModel : this.config.apiSettings.openaiModel, inline: true },
+                { name: '🖼️ 图片处理模式', value: modeNames[this.config.apiSettings.imageProcessingMode] || '智能模式', inline: true }
             );
 
         const row1 = new ActionRowBuilder()
@@ -1010,12 +1023,102 @@ class BochiBot {
                 new ButtonBuilder()
                     .setCustomId('get_models')
                     .setLabel('获取可用模型')
+                    .setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder()
+                    .setCustomId('image_processing_config')
+                    .setLabel('图片处理设置')
                     .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('🖼️')
+            );
+
+        const row4 = new ActionRowBuilder()
+            .addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId('select_image_processing_mode')
+                    .setPlaceholder('选择图片处理模式')
+                    .addOptions([
+                        {
+                            label: 'URL模式（省流量）',
+                            description: '仅使用URL Context，节省下载流量',
+                            value: 'url',
+                            emoji: '🔗'
+                        },
+                        {
+                            label: '下载模式（稳定）',
+                            description: '总是下载图片，处理更稳定',
+                            value: 'download',
+                            emoji: '⬇️'
+                        },
+                        {
+                            label: '智能模式（推荐）',
+                            description: '先尝试URL，失败后自动下载',
+                            value: 'smart',
+                            emoji: '🧠'
+                        },
+                        {
+                            label: '仅URL模式（最省流量）',
+                            description: '仅使用URL，失败则跳过',
+                            value: 'urlonly',
+                            emoji: '💾'
+                        }
+                    ])
             );
 
         await interaction.update({
             embeds: [embed],
-            components: [row1, row2, row3]
+            components: [row1, row2, row3, row4]
+        });
+    }
+
+    async showImageProcessingInfo(interaction) {
+        const modeNames = {
+            'url': 'URL模式（省流量）',
+            'download': '下载模式（稳定）',
+            'smart': '智能模式（推荐）',
+            'urlonly': '仅URL模式（最省流量）'
+        };
+        
+        const currentMode = this.config.apiSettings.imageProcessingMode;
+        
+        const embed = new EmbedBuilder()
+            .setColor('#FF6B9D')
+            .setTitle('🖼️ 图片处理模式详细说明')
+            .setDescription(`**当前模式**: ${modeNames[currentMode] || '智能模式'}`)
+            .addFields(
+                { 
+                    name: '🔗 URL模式（省流量）',
+                    value: '仅使用Gemini的URL Context Tool直接分析图片链接\n• ✅ 节省下载流量\n• ❌ 可能无法访问Discord图片链接\n• 💾 流量消耗：极小',
+                    inline: false
+                },
+                {
+                    name: '⬇️ 下载模式（稳定）',
+                    value: '总是下载图片到本地，然后发送给AI分析\n• ✅ 处理成功率最高\n• ❌ 消耗下载流量\n• 💾 流量消耗：最大',
+                    inline: false
+                },
+                {
+                    name: '🧠 智能模式（推荐）',
+                    value: '先尝试URL模式，失败后自动切换到下载模式\n• ✅ 平衡流量和成功率\n• ✅ 自动回退机制\n• 💾 流量消耗：适中',
+                    inline: false
+                },
+                {
+                    name: '💾 仅URL模式（最省流量）',
+                    value: '仅使用URL模式，失败了直接跳过不下载\n• ✅ 流量消耗最小\n• ❌ 可能跳过某些图片\n• 💾 流量消耗：最小',
+                    inline: false
+                }
+            );
+
+        const backButton = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('api_settings')
+                    .setLabel('返回API设置')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('⬅️')
+            );
+
+        await interaction.update({
+            embeds: [embed],
+            components: [backButton]
         });
     }
 
@@ -1369,6 +1472,10 @@ class BochiBot {
                 this.config.apiSettings.openaiModel = interaction.values[0];
                 await this.showApiSettings(interaction);
                 break;
+            case 'select_image_processing_mode':
+                this.config.apiSettings.imageProcessingMode = interaction.values[0];
+                await this.showApiSettings(interaction);
+                break;
             case 'emoji_selection_menu':
                 const emojiGuild = interaction.guild;
                 if (!emojiGuild) {
@@ -1701,8 +1808,89 @@ class BochiBot {
     }
 
     async getGeminiImageComment(imageUrl) {
+        const mode = this.config.apiSettings.imageProcessingMode;
+        
+        switch (mode) {
+            case 'url':
+                return await this.getGeminiImageCommentByUrl(imageUrl);
+            case 'download':
+                return await this.getGeminiImageCommentByDownload(imageUrl);
+            case 'smart':
+                // 先尝试URL，失败了再下载
+                let result = await this.getGeminiImageCommentByUrl(imageUrl);
+                if (!result) {
+                    console.log('🔄 URL方式失败，切换到下载方式');
+                    result = await this.getGeminiImageCommentByDownload(imageUrl);
+                }
+                return result;
+            case 'urlonly':
+                // 仅尝试URL，失败了就跳过
+                return await this.getGeminiImageCommentByUrl(imageUrl);
+            default:
+                console.warn('未知的图片处理模式，使用智能模式');
+                return await this.getGeminiImageComment(imageUrl); // 递归调用智能模式
+        }
+    }
+
+    async getGeminiImageCommentByUrl(imageUrl) {
         try {
-            console.log('🔄 使用传统下载方式处理图片（更稳定）');
+            console.log('🔗 使用URL Context处理图片（省流量）');
+            
+            // 轮询使用API密钥
+            const currentApiKey = this.config.apiSettings.geminiApiKeys[this.config.apiSettings.geminiCurrentIndex];
+            this.config.apiSettings.geminiCurrentIndex = 
+                (this.config.apiSettings.geminiCurrentIndex + 1) % this.config.apiSettings.geminiApiKeys.length;
+
+            const genAI = new GoogleGenerativeAI(currentApiKey);
+            const model = genAI.getGenerativeModel({ 
+                model: this.config.apiSettings.geminiModel,
+                tools: [{ urlContext: {} }]
+            });
+
+            const prompt = this.config.botSettings.aiPrompt;
+            const result = await model.generateContent([
+                `${prompt}\n\n请分析这张图片: ${imageUrl}`
+            ]);
+
+            const responseText = result.response.text();
+            
+            // 检查是否是无法访问图片的标准错误回复（更全面的检测）
+            const failureIndicators = [
+                '无法访问', 'cannot access', 'unable to access',
+                '无法直接', '我无法', '无法查看', '无法看到',
+                'cannot see', 'cannot view', 'unable to see',
+                'I cannot', 'I\'m unable', 'I cannot access',
+                '抱歉，我无法', '很抱歉，我无法',
+                'cannot directly', 'unable to directly',
+                '无法分析', '无法处理'
+            ];
+            
+            console.log(`🔍 检查AI回复是否包含失败指示词: "${responseText.substring(0, 50)}..."`);
+            
+            const hasFailureIndicator = failureIndicators.some(indicator => {
+                const match = responseText.toLowerCase().includes(indicator.toLowerCase());
+                if (match) {
+                    console.log(`🎯 检测到失败指示词: "${indicator}"`);
+                }
+                return match;
+            });
+            
+            if (hasFailureIndicator) {
+                console.log('⚠️  URL Context返回无法访问图片的回复，触发fallback');
+                return null; // 返回null表示失败
+            }
+
+            console.log('✅ URL Context处理成功');
+            return responseText;
+        } catch (error) {
+            console.error('URL Context处理失败:', error.message);
+            return null;
+        }
+    }
+
+    async getGeminiImageCommentByDownload(imageUrl) {
+        try {
+            console.log('⬇️  下载图片处理（更稳定）');
             
             // 轮询使用API密钥
             const currentApiKey = this.config.apiSettings.geminiApiKeys[this.config.apiSettings.geminiCurrentIndex];
@@ -1715,7 +1903,7 @@ class BochiBot {
             // 下载图片
             const response = await axios.get(imageUrl, { 
                 responseType: 'arraybuffer',
-                timeout: 30000, // 30秒超时
+                timeout: 30000,
                 headers: {
                     'User-Agent': 'DiscordBot (https://discord.com)'
                 }
@@ -1723,7 +1911,6 @@ class BochiBot {
             const imageData = Buffer.from(response.data).toString('base64');
 
             const prompt = this.config.botSettings.aiPrompt;
-
             const result = await model.generateContent([
                 prompt,
                 {
@@ -1734,9 +1921,10 @@ class BochiBot {
                 }
             ]);
 
+            console.log('✅ 下载方式处理成功');
             return result.response.text();
         } catch (error) {
-            console.error('Gemini 图片处理失败:', error);
+            console.error('下载方式处理失败:', error.message);
             return null;
         }
     }
@@ -1776,7 +1964,33 @@ class BochiBot {
     }
 
     async getOpenAIImageComment(imageUrl) {
+        const mode = this.config.apiSettings.imageProcessingMode;
+        
+        switch (mode) {
+            case 'url':
+            case 'urlonly':
+                // OpenAI支持直接使用URL，这两种模式处理方式相同
+                return await this.getOpenAIImageCommentByUrl(imageUrl);
+            case 'download':
+                return await this.getOpenAIImageCommentByDownload(imageUrl);
+            case 'smart':
+                // 先尝试URL，失败了再下载（OpenAI的URL支持一般比较稳定）
+                let result = await this.getOpenAIImageCommentByUrl(imageUrl);
+                if (!result) {
+                    console.log('🔄 OpenAI URL方式失败，切换到下载方式');
+                    result = await this.getOpenAIImageCommentByDownload(imageUrl);
+                }
+                return result;
+            default:
+                console.warn('未知的图片处理模式，使用URL模式');
+                return await this.getOpenAIImageCommentByUrl(imageUrl);
+        }
+    }
+
+    async getOpenAIImageCommentByUrl(imageUrl) {
         try {
+            console.log('🔗 OpenAI使用URL模式处理图片（省流量）');
+            
             const response = await axios.post(
                 `${this.config.apiSettings.openaiApiUrl}/v1/chat/completions`,
                 {
@@ -1808,9 +2022,65 @@ class BochiBot {
                 }
             );
 
+            console.log('✅ OpenAI URL模式处理成功');
             return response.data.choices[0].message.content;
         } catch (error) {
-            console.error('OpenAI API调用失败:', error);
+            console.error('OpenAI URL模式处理失败:', error.message);
+            return null;
+        }
+    }
+
+    async getOpenAIImageCommentByDownload(imageUrl) {
+        try {
+            console.log('⬇️  OpenAI下载图片处理（更稳定）');
+            
+            // 下载图片
+            const response = await axios.get(imageUrl, { 
+                responseType: 'arraybuffer',
+                timeout: 30000,
+                headers: {
+                    'User-Agent': 'DiscordBot (https://discord.com)'
+                }
+            });
+            const imageData = Buffer.from(response.data).toString('base64');
+            const mimeType = response.headers['content-type'] || 'image/jpeg';
+
+            // 使用base64数据格式发送给OpenAI
+            const apiResponse = await axios.post(
+                `${this.config.apiSettings.openaiApiUrl}/v1/chat/completions`,
+                {
+                    model: this.config.apiSettings.openaiModel,
+                    messages: [
+                        {
+                            role: "user",
+                            content: [
+                                {
+                                    type: "text",
+                                    text: this.config.botSettings.aiPrompt
+                                },
+                                {
+                                    type: "image_url",
+                                    image_url: {
+                                        url: `data:${mimeType};base64,${imageData}`
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    max_tokens: 300
+                },
+                {
+                    headers: {
+                        'Authorization': `Bearer ${this.config.apiSettings.openaiApiKey}`,
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
+
+            console.log('✅ OpenAI下载方式处理成功');
+            return apiResponse.data.choices[0].message.content;
+        } catch (error) {
+            console.error('OpenAI下载方式处理失败:', error.message);
             return null;
         }
     }
